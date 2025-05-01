@@ -1,3 +1,7 @@
-Downstream - 
+Downstream -
+---
+Build regressors for gene expression - L1000
 
-Build regressors for gene expression
+Test different regression methods - xgboost, DL
+---
+Value per signature - Adam, 
