@@ -13,18 +13,19 @@ import musical
 import argparse
 
 #  arg parsing
-parser = argparse.ArgumentParser(description='Run Musical refitting with user-defined parameters.')
+parser = argparse.ArgumentParser(description='Select best thresholds.')
 parser.add_argument('--project_title', type=str, default="validate_grid_musical", help='Project title')
+parser.add_argument('--tumor_type', type=str, default="", help='Tumor type if catalog restricted, otherwise leave empty')
 args = parser.parse_args()
 
 # set dirs
 data_dir = "/gpfs/data/courses/aio2025/yb2612/data/musical"
 results_dir = "/gpfs/data/courses/aio2025/yb2612/results/musical_models"
-model_path = f"{results_dir}/{args.project_title}_assign_grid.pkl"
+model_path = f"{results_dir}/{args.project_title}_{args.tumor_type}_assign_grid.pkl"
 
 print("------------------------------------")
 print("Project title:", args.project_title)
-print(f"Using {args.project_title}_assign_grid model.")
+print(f"Using {args.project_title}_{args.tumor_type}_assign_grid model.")
 print("------------------------------------")
 
 print("Loading model...")
@@ -47,4 +48,4 @@ print("\nSaving model...")
 with open(f'{results_dir}/{args.project_title}_validate_grid.pkl', 'wb') as f:
     pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
 
-print(f"Model saved as {results_dir}/{args.project_title}_validate_grid.pkl.")
+print(f"Model saved as {results_dir}/{args.project_title}_{args.tumor_type}_validate_grid.pkl.")

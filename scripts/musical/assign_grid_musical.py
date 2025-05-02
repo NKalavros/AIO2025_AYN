@@ -13,8 +13,9 @@ import musical
 import argparse
 
 #  arg parsing
-parser = argparse.ArgumentParser(description='Run Musical refitting with user-defined parameters.')
+parser = argparse.ArgumentParser(description='Assigning signatures with 2D threshold grid search.')
 parser.add_argument('--project_title', type=str, default="assign_grid_musical", help='Project title')
+parser.add_argument('--tumor_type', type=str, default="", help='Tumor type to restrict the catalog to')
 args = parser.parse_args()
 
 # set dirs
@@ -24,7 +25,7 @@ model_path = f"{results_dir}/{args.project_title}.pkl"
 
 print("------------------------------------")
 print("Project title:", args.project_title)
-print(f"Using {args.project_title} model.")
+print(f"Using {args.project_title} model with restriction {args.tumor_type}.")
 print("------------------------------------")
 
 print("Loading model...")
@@ -45,6 +46,8 @@ thresh_grid = np.array([
 print("Threshold grid for matching and refitting:", thresh_grid)
 
 catalog = musical.load_catalog('COSMIC-MuSiCal_v3p2_SBS_WGS')
+print(f"Restricting catalog to tumor type '{args.tumor_type}'...")
+catalog.restrict_catalog(tumor_type=args.tumor_type)
 W_catalog = catalog.W
 print(W_catalog.shape[1])
 
@@ -61,10 +64,10 @@ model.assign_grid(W_catalog,
 print("Finished assigning grid.")
 
 print("\nSaving model...")
-with open(f'{results_dir}/{args.project_title}_assign_grid.pkl', 'wb') as f:
+with open(f'{results_dir}/{args.project_title}_{args.tumor_type}_assign_grid.pkl', 'wb') as f:
     pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
 
-print(f"Model saved as {results_dir}/{args.project_title}_assign_grid.pkl.")
+print(f"Model saved as {results_dir}/{args.project_title}_{args.tumor_type}_assign_grid.pkl.")
 
 print("Result with small thresholds:")
 print("W:", model.W_s_grid[(0.0001, 0.0001)].shape)

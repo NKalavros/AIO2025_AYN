@@ -13,7 +13,7 @@ import musical
 import os
 
 #  arg parsing
-parser = argparse.ArgumentParser(description='Run Musical with user-defined parameters.')
+parser = argparse.ArgumentParser(description='De novo signature discovery.')
 parser.add_argument('--project_title', type=str, default="run_denovo_musical", help='Project title')
 parser.add_argument('--input_X', type=str, default="X", help='Input matrix name')
 args = parser.parse_args()
@@ -34,8 +34,8 @@ print(X.head())
 
 print("\nRunning Musical...")
 model = musical.DenovoSig(X, 
-                          min_n_components=14, # Minimum number of signatures to test
-                          max_n_components=18, # Maximum number of signatures to test
+                          min_n_components=1, # Minimum number of signatures to test
+                          max_n_components=20, # Maximum number of signatures to test
                           init='random', # Initialization method
                           method='mvnmf', # mvnmf or nmf
                           n_replicates=20, # Number of mvnmf/nmf replicates to run per n_components
@@ -43,7 +43,7 @@ model = musical.DenovoSig(X,
                           min_iter=1000,  # jin
                           max_iter=10000,  # jin
                           conv_test_freq=100,  # jin
-                          mvnmf_lambda_tilde_grid=np.array([1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0]),  # jin
+                          mvnmf_lambda_tilde_grid=np.array([1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]),  # jin
                           bootstrap=True, # Whether or not to bootstrap X for each run
                           tol=1e-5, # Tolerance for claiming convergence of mvnmf/nmf
                           verbose=1, # Verbosity of output
