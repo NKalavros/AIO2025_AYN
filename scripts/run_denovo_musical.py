@@ -14,13 +14,13 @@ import os
 
 #  arg parsing
 parser = argparse.ArgumentParser(description='Run Musical with user-defined parameters.')
-parser.add_argument('--project_title', type=str, default="run_musical", help='Project title')
+parser.add_argument('--project_title', type=str, default="run_denovo_musical", help='Project title')
 parser.add_argument('--input_X', type=str, default="X", help='Input matrix name')
 args = parser.parse_args()
 
 # set dirs
-data_dir = "/gpfs/home/yb2612/aio2025/yb2612/data/musical"
-results_dir = "/gpfs/home/yb2612/aio2025/yb2612/results/musical_models"
+data_dir = "/gpfs/data/courses/aio2025/yb2612/data/musical"
+results_dir = "/gpfs/data/courses/aio2025/yb2612/results/musical_models"
 X_path = f"{data_dir}/{args.input_X}.csv"
 X = pd.read_csv(X_path, index_col=0)
 
