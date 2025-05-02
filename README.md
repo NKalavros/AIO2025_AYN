@@ -31,7 +31,8 @@
      * `brca_musical_mvnmf_assign_grid.pkl` = model after running `assign_grid` for BRCA cohort on entire COSMIC-MuSiCal_v3p2_SBS_WGS with no restriction (can disregard, likely many false positives).
 
    * Signature (W) and exposure (H) matrices with lowest thresholds saved to `/gpfs/data/courses/aio2025/yb2612/results/musical_matrices`
-
+     * `W`: Signature matrix (features x signatures)
+     * `H`: Exposure matrix (signatures x samples)
      * `brca_musical_mvnmf_Breast.AdenoCA_W_s_0.0001_0.0001.csv` = sparse signature matrix (W_s) for the BRCA cohort on COSMIC-MuSiCal_v3p2_SBS_WGS restricted to Breast.AdenoCA with matching and refitting thresholds of 0.0001.
      * The number of signatures seems reasonable when selecting lowest thresholds. However to be sure, we can try the step below.
 
