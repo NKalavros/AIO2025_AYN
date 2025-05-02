@@ -12,6 +12,6 @@
 3. SigMA (https://github.com/parklab/SigMA)
 
 ## Running MuSiCal
-1. run_denovo_musical.py
-2. assign_grid_musical.py
-3. validate_grid_musical.py
+1. [run_denovo_musical.py](https://github.com/yumibriones/AIO2025_AYN/blob/main/scripts/run_denovo_musical.py)
+2. [assign_grid_musical.py](https://github.com/yumibriones/AIO2025_AYN/blob/main/scripts/assign_grid_musical.py)
+3. [validate_grid_musical.py](https://github.com/yumibriones/AIO2025_AYN/blob/main/scripts/validate_grid_musical.py)
