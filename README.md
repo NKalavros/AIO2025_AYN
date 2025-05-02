@@ -13,9 +13,10 @@
 
 ## Running MuSiCal
 
-See 
+*See [notebooks/musical_full_pipeline.ipynb](https://github.com/yumibriones/AIO2025_AYN/blob/main/notebooks/musical_full_pipeline.ipynb) for more details on full pipeline and analysis of results.*
 
-Data prep: [musical_data_prep.ipynb](https://github.com/yumibriones/AIO2025_AYN/blob/main/notebooks/musical_data_prep.ipynb)
+0. Prepare input matrices: [musical_data_prep.ipynb](https://github.com/yumibriones/AIO2025_AYN/blob/main/notebooks/musical_data_prep.ipynb)
+
 1. De novo signature discovery: [run_denovo_musical.py](https://github.com/yumibriones/AIO2025_AYN/blob/main/scripts/musical/run_denovo_musical.py)
 
    * Model saved to `/gpfs/data/courses/aio2025/yb2612/results/musical_models`
