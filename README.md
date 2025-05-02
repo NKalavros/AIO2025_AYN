@@ -12,6 +12,9 @@
 3. SigMA (https://github.com/parklab/SigMA)
 
 ## Running MuSiCal
+
+See 
+
 Data prep: [musical_data_prep.ipynb](https://github.com/yumibriones/AIO2025_AYN/blob/main/notebooks/musical_data_prep.ipynb)
 1. De novo signature discovery: [run_denovo_musical.py](https://github.com/yumibriones/AIO2025_AYN/blob/main/scripts/musical/run_denovo_musical.py)
 
