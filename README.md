@@ -29,5 +29,33 @@ Data prep: [musical_data_prep.ipynb](https://github.com/yumibriones/AIO2025_AYN/
    * Signature (W) and exposure (H) matrices with lowest thresholds saved to `/gpfs/data/courses/aio2025/yb2612/results/musical_matrices`
 
      * `brca_musical_mvnmf_Breast.AdenoCA_W_s_0.0001_0.0001.csv` = sparse signature matrix (W_s) for the BRCA cohort on COSMIC-MuSiCal_v3p2_SBS_WGS restricted to Breast.AdenoCA with matching and refitting thresholds of 0.0001.
+     * The number of signatures seems reasonable when selecting lowest thresholds. However to be sure, we can try the step below.
 
-4. Select best thresholds: [validate_grid_musical.py](https://github.com/yumibriones/AIO2025_AYN/blob/main/scripts/musical/validate_grid_musical.py) (not performed, gets stuck when I run it)
+4. OPTIONAL: Select best thresholds: [validate_grid_musical.py](https://github.com/yumibriones/AIO2025_AYN/blob/main/scripts/musical/validate_grid_musical.py)
+   
+   * Could not perform this step, gets stuck at "Extracting signatures" for 10+ hours.
+   * If you want to try this step, run the script using bash as follows:
+
+### CESC
+```bash
+python -u validate_grid_musical.py --project_title "cesc_musical_mvnmf" --tumor_type 'Cervix.AdenoCA' &
+python -u validate_grid_musical.py --project_title "cesc_musical_mvnmf" --tumor_type 'Cervix.SCC'
+```
+
+### UCEC
+```bash
+python -u validate_grid_musical.py --project_title "ucec_musical_mvnmf" --tumor_type 'Uterus.AdenoCA'
+```
+
+### OV
+```bash
+python -u validate_grid_musical.py --project_title "ov_musical_mvnmf" --tumor_type 'Ovary.AdenoCA'
+```
+
+### BRCA
+```bash
+python -u validate_grid_musical.py --project_title "brca_musical_mvnmf" --tumor_type 'Breast.AdenoCA' &
+python -u validate_grid_musical.py --project_title "brca_musical_mvnmf" --tumor_type 'Breast.DCIS' &
+python -u validate_grid_musical.py --project_title "brca_musical_mvnmf" --tumor_type 'Breast.LobularCA' 
+```
+  
