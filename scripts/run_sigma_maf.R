@@ -11,7 +11,7 @@ for (i in seq(1, length(files_use))) {
     system(command) # being very explicit
 }
 
-output_dir = "/gpfs/data/courses/aio2025/yb2612/data/outputs/"
+output_dir <- "/gpfs/data/courses/aio2025/yb2612/data/outputs/"
 dir.create(output_dir)
 output_dir <- "/gpfs/data/courses/aio2025/yb2612/data/outputs/extracted_mafs"
 dir.create(output_dir)
@@ -20,7 +20,7 @@ system(paste0("mv ", data_dir, "/*.maf ", "/gpfs/data/courses/aio2025/yb2612/dat
 genomes_matrix <- make_matrix(output_dir, file_type = "maf", ref_genome_name = "hg38")
 
 
-output_dir = "/gpfs/data/courses/aio2025/yb2612/data/outputs/"
+output_dir <- "/gpfs/data/courses/aio2025/yb2612/data/outputs/"
 dir.create(output_dir)
 genome_file <- "hereyougoyumi.csv"
 
@@ -43,7 +43,7 @@ sample.names <- make.unique(sample.names)
 colnames(genomes_matrix) <- sample.names
 
 
-output_dir = "/gpfs/data/courses/aio2025/yb2612/data/outputs/"
+output_dir <- "/gpfs/data/courses/aio2025/yb2612/data/outputs/"
 dir.create(output_dir)
 genome_file <- "hereyougoyumi2.csv"
 
@@ -67,8 +67,12 @@ print(table(sample_manifest[["Project ID"]]))
 # TCGA-BRCA TCGA-CESC   TCGA-OV TCGA-UCEC
 
 tumors <- c(
-    "TCGA-CESC"
+    "TCGA-CESC",
+    "TCGA-BRCA",
+    "TCGA-OV",
+    "TCGA-UCEC"
 )
+res.all <- list()
 for (i in tumors) {
     print(i)
     genomes_matrix.project <- genomes_matrix[, sample_manifest[["Project ID"]] == i]
@@ -104,6 +108,7 @@ for (i in tumors) {
         add_sig3 = TRUE
     )
     saveRDS(res, file = paste0(project_dir, i, ".rds"))
+    res.all[[i]] <- res
 }
 
 
@@ -131,6 +136,7 @@ df <- cbind(df, df_exps_clusters)
 df$tumor <- "cervix"
 lite <- lite_df(df)
 df_exps <- get_sig_exps(df = lite, col_exps = "sigs_all", col_sigs = "exps_all")
+
 lite$Signature_3_l_rat
 lite$Signature_3_mva
 lite$pass_mva_strict
