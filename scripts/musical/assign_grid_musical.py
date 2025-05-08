@@ -1,21 +1,15 @@
 print("Importing modules...")
 import os
 import numpy as np
-import scipy.stats as stats
-import matplotlib.pyplot as plt
-import seaborn as sns
-import matplotlib as mpl
-import pandas as pd
-import time
-import scipy as sp
 import pickle
-import musical
 import argparse
+import random
+import musical
 
 #  arg parsing
 parser = argparse.ArgumentParser(description='Assigning signatures with 2D threshold grid search.')
 parser.add_argument('--project_title', type=str, default="assign_grid_musical", help='Project title')
-parser.add_argument('--tumor_type', type=str, default="", help='Tumor type to restrict the catalog to')
+parser.add_argument('--tumor_type', type=str, default=None, help='Tumor type to restrict the catalog to')
 args = parser.parse_args()
 
 # set dirs
@@ -27,6 +21,12 @@ print("------------------------------------")
 print("Project title:", args.project_title)
 print(f"Using {args.project_title} model with restriction {args.tumor_type}.")
 print("------------------------------------")
+
+# set seed
+print("Setting seed...")
+seed_value = 9 
+np.random.seed(seed_value)  # numpy seed
+random.seed(seed_value)  # python random seed
 
 print("Loading model...")
 with open(model_path, 'rb') as f:
@@ -47,7 +47,8 @@ print("Threshold grid for matching and refitting:", thresh_grid)
 
 catalog = musical.load_catalog('COSMIC-MuSiCal_v3p2_SBS_WGS')
 print(f"Restricting catalog to tumor type '{args.tumor_type}'...")
-catalog.restrict_catalog(tumor_type=args.tumor_type)
+if args.tumor_type is not None:
+    catalog.restrict_catalog(tumor_type=args.tumor_type)
 W_catalog = catalog.W
 print(W_catalog.shape[1])
 
@@ -64,10 +65,13 @@ model.assign_grid(W_catalog,
 print("Finished assigning grid.")
 
 print("\nSaving model...")
-with open(f'{results_dir}/{args.project_title}_{args.tumor_type}_assign_grid.pkl', 'wb') as f:
+suffix = f"_{args.tumor_type}" if args.tumor_type else ""
+filename = f"{args.project_title}{suffix}_assign_grid.pkl"
+
+with open(f'{results_dir}/{filename}', 'wb') as f:
     pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
 
-print(f"Model saved as {results_dir}/{args.project_title}_{args.tumor_type}_assign_grid.pkl.")
+print(f"Model saved as {results_dir}/{filename}")
 
 print("Result with small thresholds:")
 print("W:", model.W_s_grid[(0.0001, 0.0001)].shape)
