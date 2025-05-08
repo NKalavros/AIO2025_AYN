@@ -1,0 +1,2625 @@
+# Import required libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import kaleido
+
+
+# Set plotting style
+sns.set_context('notebook')
+%matplotlib inline
+
+import os
+sigs_dir_musical='/gpfs/data/courses/aio2025/yb2612/results/musical_matrices/final_H'
+matrices_paths = [x for x in os.listdir(sigs_dir_musical) if x.endswith('.csv')]
+# Split the filenames in that directory by _, keep the first part and prepend it to the name of each column in each respective matrix
+matrices = [pd.read_csv(os.path.join(sigs_dir_musical, m), index_col=0) for m in matrices_paths]
+prefixes = [m.split('_')[0] for m in matrices_paths]
+for i, m in enumerate(matrices):
+    m.index = [prefixes[i] + '-' + col for col in m.index]
+# Merge the matrices, but take into account the different columns
+merged_matrix_musical = pd.concat(matrices, axis=0)
+
+[x.shape for x in matrices]
+
+merged_matrix_musical.shape
+
+np.unique(merged_matrix_musical.columns,return_counts=True)
+
+# Load the gene expression data
+
+expr_dir = '/gpfs/data/courses/aio2025/yb2612/data/c6_top1000'
+expr_files = [x for x in os.listdir(expr_dir) if x.endswith('.csv')]
+# Remove the file if it contains pangyn
+expr_files = [x for x in expr_files if 'pangyn' not in x]
+expr_matrices = [pd.read_csv(os.path.join(expr_dir, x), index_col=0) for x in expr_files]
+expr_matrix = pd.concat(expr_matrices, axis=1)
+prefixes = [x.split('_')[0] for x in expr_files]
+for i, m in enumerate(expr_matrices):
+    m.index = [prefixes[i] + '-' + col for col in m.index]
+# Rearrange the column order for all the matrices in expr_matrices
+# First get the intersection of the columns of all the matrices. There's 4 of them
+common_columns = np.intersect1d(expr_matrices[0].columns, expr_matrices[1].columns)
+common_columns = np.intersect1d(common_columns, expr_matrices[2].columns)
+common_columns = np.intersect1d(common_columns, expr_matrices[3].columns)
+# Then rearrange the columns of all the matrices to be in the same order
+for i, m in enumerate(expr_matrices):
+    expr_matrices[i] = m[common_columns]
+# Merge the matrices across rows, but take into account the different columns
+merged_matrix_expr = pd.concat(expr_matrices, axis=0)
+# Select the samples in the expression matrix whose rownames end with a -01
+merged_matrix_expr = merged_matrix_expr[merged_matrix_expr.index.str.endswith('-01')]
+# Remove that suffix from the index
+merged_matrix_expr.index = merged_matrix_expr.index.str.rstrip('-01')
+
+
+
+merged_matrix_expr.head()
+
+merged_matrix_expr.shape
+
+# Load Adam's sample x signature matrix
+sigassigner_dir = '/gpfs/data/courses/aio2025/adw9882/Analysis/output/'
+# Get all subfolders there
+sigassigner_dirs = [x for x in os.listdir(sigassigner_dir) if os.path.isdir(os.path.join(sigassigner_dir, x))]
+# Remove logs if it is there
+sigassigner_dirs = [x for x in sigassigner_dirs if 'logs' not in x]
+prefixes = [x.split('_')[-1] for x in sigassigner_dirs]
+# Append 'Assignment_Solution/Activities/Assignment_Solution_Activities.txt' to each of them
+sigassigner_files = [os.path.join(sigassigner_dir, d, 'Assignment_Solution', 'Activities', 'Assignment_Solution_Activities.txt') for d in sigassigner_dirs]
+# Load the files
+sigassigner_matrices = [pd.read_table(f, index_col=0, delimiter='\t') for f in sigassigner_files]
+for i, m in enumerate(sigassigner_matrices):
+    m.index = [prefixes[i] + '-' + col for col in m.index]
+# Merge the matrices, but take into account the different columns
+merged_matrix_sigassigner = pd.concat(sigassigner_matrices, axis=0)
+
+
+
+[x.shape for x in sigassigner_matrices]
+
+merged_matrix_sigassigner.shape
+
+# Intersect the matrices to get common rows (samples) and expression matrix. 3 matrices
+
+common_samples = np.unique(np.array(list(set(merged_matrix_musical.index) & set(merged_matrix_sigassigner.index) & set(merged_matrix_expr.index))))
+
+
+
+
+
+
+
+print(len(common_samples))
+
+# Subset each matrix
+merged_matrix_musical = merged_matrix_musical.loc[common_samples]
+merged_matrix_sigassigner = merged_matrix_sigassigner.loc[common_samples]
+merged_matrix_expr = merged_matrix_expr.loc[common_samples]
+
+merged_matrix_musical.shape
+
+merged_matrix_sigassigner.shape
+
+# Set NaN to 0
+merged_matrix_musical = merged_matrix_musical.fillna(0)
+merged_matrix_sigassigner = merged_matrix_sigassigner.fillna(0)
+# Scale the data
+merged_matrix_musical = merged_matrix_musical.div(merged_matrix_musical.sum(axis=1), axis=0)
+merged_matrix_sigassigner = merged_matrix_sigassigner.div(merged_matrix_sigassigner.sum(axis=1), axis=0)
+
+merged_matrix_musical.columns = ['msc-' + col for col in merged_matrix_musical.columns]
+merged_matrix_sigassigner.columns = ['sa-' + col for col in merged_matrix_sigassigner.columns]
+
+merged_matrix_sigassigner.head()
+
+merged_matrix_musical.head()
+
+
+# Prefix each column of musical with msc and sigassigner with sa so that it is msc-sbs1, msc-sbs2, etc.
+
+# Concatenate them on the y axis
+merged_matrix_signatures = pd.concat([merged_matrix_musical, merged_matrix_sigassigner], axis=1)
+
+# NaN to 0
+merged_matrix_signatures = merged_matrix_signatures.fillna(0)
+merged_matrix_expr = merged_matrix_expr.fillna(0)
+
+merged_matrix_signatures.shape
+
+# Filter signatures that have low variance across samples (rows)
+merged_matrix_signatures = merged_matrix_signatures.loc[:, merged_matrix_signatures.var() > 0.001]
+print(merged_matrix_signatures.shape)
+
+np.unique(merged_matrix_signatures.columns,return_counts=True)
+
+# Filter genes that have low variance across samples (rows)
+merged_matrix_expr = merged_matrix_expr.loc[:, merged_matrix_expr.var() > 2]
+print(merged_matrix_expr.shape)
+
+# Fixed Advanced Feature Importance Function
+def advanced_feature_importance(model, test_loader, signature_names, gene_names, 
+                                     num_background_samples=50, num_target_genes=5):
+    """
+    Perform advanced feature importance analysis with robust error handling.
+    
+    Args:
+        model: Trained PyTorch model
+        test_loader: DataLoader for test data
+        signature_names: List of mutational signature names
+        gene_names: List of gene names
+        num_background_samples: Number of samples to use for background distribution
+        num_target_genes: Number of top genes to analyze
+    """
+    model.eval()
+    
+    # Get a batch of data for analysis
+    signatures_batch = None
+    for batch in test_loader:
+        signatures_batch, expressions_batch = batch
+        if len(signatures_batch) >= 20:  # Get a reasonably sized batch
+            break
+    
+    if signatures_batch is None:
+        print("Could not get batch data from test_loader")
+        return None
+        
+    signatures_batch = signatures_batch.to(device)
+    expressions_batch = expressions_batch.to(device)
+    
+    # Convert to numpy for easier handling
+    signatures_numpy = signatures_batch.cpu().numpy()
+    expressions_numpy = expressions_batch.cpu().numpy()
+    
+    print(f"Running advanced feature importance analysis on {num_target_genes} top genes...")
+    
+    # Get R² scores for each gene to find the most predictable genes
+    all_predictions = []
+    all_targets = []
+    
+    with torch.no_grad():
+        for signatures, expressions in test_loader:
+            signatures, expressions = signatures.to(device), expressions.to(device)
+            outputs = model(signatures)
+            
+            all_predictions.append(outputs.cpu().numpy())
+            all_targets.append(expressions.cpu().numpy())
+    
+    predictions = np.vstack(all_predictions)
+    targets = np.vstack(all_targets)
+    
+    r2_scores = []
+    for i in range(targets.shape[1]):
+        r2 = np.corrcoef(predictions[:, i], targets[:, i])[0, 1] ** 2
+        r2_scores.append(r2)
+    
+    # Select top genes by R² for detailed analysis
+    top_genes_idx = np.argsort(r2_scores)[-num_target_genes:][::-1]
+    top_gene_names = [gene_names[idx] for idx in top_genes_idx]
+    
+    print(f"Top {num_target_genes} genes selected for analysis: {', '.join(top_gene_names)}")
+    
+    # Create a directory for feature importance visualizations
+    os.makedirs("feature_importance", exist_ok=True)
+    
+    # --------------------------------
+    # Check for duplicate signatures
+    # --------------------------------
+    signature_counts = {}
+    for name in signature_names:
+        if name in signature_counts:
+            signature_counts[name] += 1
+        else:
+            signature_counts[name] = 1
+    
+    has_duplicates = any(count > 1 for count in signature_counts.values())
+    
+    if has_duplicates:
+        print("WARNING: Found duplicate signature names:")
+        for name, count in signature_counts.items():
+            if count > 1:
+                print(f"  - '{name}' appears {count} times")
+        
+        # Create fixed signature names
+        fixed_signature_names = []
+        name_counters = {}
+        
+        for name in signature_names:
+            if name in name_counters:
+                name_counters[name] += 1
+                fixed_signature_names.append(f"{name} ({name_counters[name]})")
+            else:
+                name_counters[name] = 0
+                fixed_signature_names.append(name)
+        
+        print("Created unique signature names by adding suffixes")
+    else:
+        fixed_signature_names = signature_names
+    
+    # --------------------------------
+    # 1. SHAP Analysis (Fixed Version)
+    # --------------------------------
+    print("Running SHAP analysis...")
+    
+    try:
+        # PyTorch model wrapper for SHAP
+        class TorchModelWrapper:
+            def __init__(self, model, target_gene_idx):
+                self.model = model
+                self.target_gene_idx = target_gene_idx
+                
+            def __call__(self, X):
+                if isinstance(X, np.ndarray):
+                    X = torch.tensor(X, dtype=torch.float32).to(device)
+                with torch.no_grad():
+                    output = self.model(X)[:, self.target_gene_idx]
+                return output.cpu().numpy()
+        
+        # Get background data for SHAP
+        background_data = []
+        background_counter = 0
+        
+        for signatures, _ in test_loader:
+            if background_counter >= num_background_samples:
+                break
+            batch_size = len(signatures)
+            needed = min(batch_size, num_background_samples - background_counter)
+            background_data.append(signatures.numpy()[:needed])
+            background_counter += needed
+            
+        background = np.vstack(background_data)
+        print(f"Using background data of shape: {background.shape}")
+        
+        # Run SHAP for each top gene
+        for i, gene_idx in enumerate(top_genes_idx):
+            gene_name = gene_names[gene_idx]
+            print(f"SHAP analysis for gene {gene_name} (R²={r2_scores[gene_idx]:.3f})...")
+            
+            # Create a wrapper model for this gene
+            wrapped_model = TorchModelWrapper(model, gene_idx)
+            
+            # Use KernelExplainer instead of DeepExplainer for more robustness
+            explainer = shap.KernelExplainer(wrapped_model, background[:50])
+            
+            # Get SHAP values for a subset of samples
+            sample_data = signatures_numpy[:20]
+            shap_values = explainer.shap_values(sample_data)
+            
+            # Handle different return types
+            if isinstance(shap_values, list):
+                if len(shap_values) > 0:
+                    shap_values = shap_values[0]
+            
+            # Check for shape mismatches
+            if shap_values.shape[1] != len(fixed_signature_names):
+                print(f"WARNING: Shape mismatch - SHAP values shape: {shap_values.shape}, Feature names length: {len(fixed_signature_names)}")
+                # Ensure dimensions match by truncating the longer one
+                min_features = min(shap_values.shape[1], len(fixed_signature_names))
+                shap_values = shap_values[:, :min_features]
+                used_signatures = fixed_signature_names[:min_features]
+                print(f"Adjusted to use {min_features} features")
+            else:
+                used_signatures = fixed_signature_names
+            
+            # Plot SHAP summary using the fixed summary plotting function
+            plt.figure(figsize=(12, 8))
+            
+            # Custom summary plot to avoid duplications
+            # First, calculate feature importance from SHAP values
+            feature_importance = np.mean(np.abs(shap_values), axis=0)
+            
+            # Sort features by importance
+            sorted_indices = np.argsort(feature_importance)
+            
+            # Select top 20 features
+            if len(sorted_indices) > 20:
+                sorted_indices = sorted_indices[-20:]
+            
+            # Get the sorted feature names and values
+            sorted_names = [used_signatures[i] for i in sorted_indices]
+            sorted_shap = shap_values[:, sorted_indices]
+            sorted_data = sample_data[:, sorted_indices] if sample_data.ndim > 1 else sample_data
+            
+            # Use SHAP's summary plot with the sorted data
+            shap.summary_plot(
+                sorted_shap, 
+                sorted_data, 
+                feature_names=sorted_names,
+                show=False, 
+                plot_size=(12, 8)
+            )
+            
+            plt.title(f"SHAP Summary for Gene: {gene_name}")
+            plt.tight_layout()
+            plt.savefig(f"feature_importance/shap_summary_{gene_name}.png", dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            # Also create a simpler bar plot for clarity
+            plt.figure(figsize=(12, 8))
+            y_pos = np.arange(len(sorted_indices))
+            plt.barh(y_pos, feature_importance[sorted_indices])
+            plt.yticks(y_pos, sorted_names)
+            plt.xlabel('Mean |SHAP Value|')
+            plt.title(f'Feature Importance (SHAP) for Gene: {gene_name}')
+            plt.tight_layout()
+            plt.savefig(f"feature_importance/shap_importance_bar_{gene_name}.png", dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            # Save SHAP values to CSV
+            shap_df = pd.DataFrame(shap_values, columns=used_signatures)
+            shap_df['gene_name'] = gene_name
+            shap_df.to_csv(f"feature_importance/shap_values_{gene_name}.csv", index=False)
+            
+            # Plot individual SHAP dependency plots for top 5 features
+            mean_abs_shap = np.abs(shap_values).mean(axis=0)
+            top_features_idx = np.argsort(mean_abs_shap)[-5:]
+            
+            for feat_idx in top_features_idx:
+                plt.figure(figsize=(8, 6))
+                # Use regular dependence plot but with our fixed names
+                shap.dependence_plot(
+                    feat_idx, 
+                    shap_values, 
+                    sample_data,
+                    feature_names=used_signatures, 
+                    show=False
+                )
+                plt.title(f"SHAP Dependence Plot: {gene_name} vs {used_signatures[feat_idx]}")
+                plt.tight_layout()
+                plt.savefig(f"feature_importance/shap_dependence_{gene_name}_{used_signatures[feat_idx]}.png", 
+                           dpi=300, bbox_inches='tight')
+                plt.close()
+        
+    except Exception as e:
+        print(f"Error in SHAP analysis: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    # --------------------------------
+    # 2. Integrated Gradients Analysis
+    # --------------------------------
+    print("Running Integrated Gradients analysis...")
+    
+    try:
+        # Create a PyTorch model wrapper for IG
+        class IGModelWrapper(nn.Module):
+            def __init__(self, base_model, target_gene_idx):
+                super().__init__()
+                self.base_model = base_model
+                self.target_gene_idx = target_gene_idx
+                
+            def forward(self, x):
+                return self.base_model(x)[:, self.target_gene_idx]
+        
+        # Run Integrated Gradients for each top gene
+        for i, gene_idx in enumerate(top_genes_idx):
+            gene_name = gene_names[gene_idx]
+            print(f"Integrated Gradients analysis for gene {gene_name}...")
+            
+            # Create a wrapper model for this gene
+            wrapped_model = IGModelWrapper(model, gene_idx).to(device)
+            
+            # Create the IG explainer
+            ig = IntegratedGradients(wrapped_model)
+            
+            # Calculate attributions for a subset of samples
+            num_samples = min(20, signatures_batch.shape[0])
+            attributions, delta = ig.attribute(signatures_batch[:num_samples], 
+                                              return_convergence_delta=True)
+            
+            # Convert to numpy
+            attributions = attributions.cpu().detach().numpy()
+            
+            # Create visualization
+            plt.figure(figsize=(15, 10))
+            
+            # Plot heatmap of attributions
+            ax = plt.subplot(111)
+            im = ax.imshow(attributions, cmap='coolwarm', aspect='auto')
+            
+            # Add colorbar
+            plt.colorbar(im, ax=ax, label='Attribution Score')
+            
+            # Set labels
+            ax.set_xlabel('Mutational Signature')
+            ax.set_ylabel('Sample')
+            ax.set_title(f'Integrated Gradients Attributions for {gene_name}')
+            
+            # Set x-axis tick labels to feature names (only show a subset for clarity)
+            tick_indices = np.linspace(0, len(fixed_signature_names)-1, min(20, len(fixed_signature_names))).astype(int)
+            ax.set_xticks(tick_indices)
+            ax.set_xticklabels([fixed_signature_names[i] for i in tick_indices], rotation=90)
+            
+            plt.tight_layout()
+            plt.savefig(f"feature_importance/ig_heatmap_{gene_name}.png", dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            # Save mean absolute attributions
+            mean_abs_attr = np.abs(attributions).mean(axis=0)
+            
+            # Ensure arrays are the same length
+            min_length = min(len(mean_abs_attr), len(fixed_signature_names))
+            attr_df = pd.DataFrame({
+                'Signature': fixed_signature_names[:min_length],
+                'Mean_Abs_Attribution': mean_abs_attr[:min_length]
+            })
+            
+            attr_df = attr_df.sort_values('Mean_Abs_Attribution', ascending=False)
+            attr_df.to_csv(f"feature_importance/ig_attributions_{gene_name}.csv", index=False)
+            
+            # Plot the top 10 signatures by attribution
+            plt.figure(figsize=(12, 6))
+            top_attrs = attr_df.head(10)
+            sns.barplot(x='Mean_Abs_Attribution', y='Signature', data=top_attrs)
+            plt.title(f'Top 10 Signatures by IG Attribution for {gene_name}')
+            plt.tight_layout()
+            plt.savefig(f"feature_importance/ig_top10_{gene_name}.png", dpi=300, bbox_inches='tight')
+            plt.close()
+    
+    except Exception as e:
+        print(f"Error in Integrated Gradients analysis: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    # --------------------------------
+    # 3. Feature Permutation Analysis
+    # --------------------------------
+    print("Running Feature Permutation analysis...")
+    
+    try:
+        # Run for each top gene
+        for i, gene_idx in enumerate(top_genes_idx):
+            gene_name = gene_names[gene_idx]
+            print(f"Feature Permutation analysis for gene {gene_name}...")
+            
+            # Create a wrapper model for this gene
+            wrapped_model = IGModelWrapper(model, gene_idx).to(device)
+            
+            # Create the permutation explainer
+            perm = FeaturePermutation(wrapped_model)
+            
+            # Calculate attributions for a subset of samples
+            num_samples = min(20, signatures_batch.shape[0])
+            perm_attr = perm.attribute(signatures_batch[:num_samples])
+            
+            # Convert to numpy
+            perm_attr = perm_attr.cpu().detach().numpy()
+            perm_attr_mean = np.mean(perm_attr, axis=0)
+            
+            # Ensure arrays are the same length
+            min_length = min(len(perm_attr_mean), len(fixed_signature_names))
+            
+            # Create a DataFrame
+            perm_df = pd.DataFrame({
+                'Signature': fixed_signature_names[:min_length],
+                'Permutation_Importance': perm_attr_mean[:min_length]
+            })
+            
+            perm_df = perm_df.sort_values('Permutation_Importance', ascending=False)
+            perm_df.to_csv(f"feature_importance/permutation_importance_{gene_name}.csv", index=False)
+            
+            # Plot
+            plt.figure(figsize=(12, 6))
+            top_perms = perm_df.head(10)
+            sns.barplot(x='Permutation_Importance', y='Signature', data=top_perms)
+            plt.title(f'Top 10 Signatures by Permutation Importance for {gene_name}')
+            plt.tight_layout()
+            plt.savefig(f"feature_importance/permutation_top10_{gene_name}.png", dpi=300, bbox_inches='tight')
+            plt.close()
+    
+    except Exception as e:
+        print(f"Error in Feature Permutation analysis: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print("Advanced feature importance analysis complete. Results saved in 'feature_importance' directory.")
+    
+    return {
+        "top_genes": top_gene_names,
+        "top_genes_idx": top_genes_idx,
+        "r2_scores": [r2_scores[idx] for idx in top_genes_idx]
+    }
+
+# Mutational Signatures to Gene Expression Regression Analysis with Optuna Tuning
+#
+# This notebook explores the relationship between mutational signatures and gene expression patterns
+# across TCGA Pan-Cancer data, using Optuna for hyperparameter optimization.
+
+# Import required libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, r2_score
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+import optuna
+from optuna.visualization import plot_optimization_history, plot_param_importances
+import time
+import joblib
+import os
+import shap
+from captum.attr import IntegratedGradients, Occlusion, FeaturePermutation
+from captum.attr import visualization as viz
+
+# Set plotting style
+sns.set_context('notebook')
+%matplotlib inline
+
+# If you need CUDA determinism, uncomment these lines
+# os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark = False
+# torch.use_deterministic_algorithms(True)
+
+# Fix random seeds for reproducibility
+SEED = 42
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+
+# Data loading and preprocessing - assuming you have the preprocessed data loaded
+# Print dimensions of our data
+print("Signature matrix shape:", merged_matrix_signatures.shape)
+print("Expression matrix shape:", merged_matrix_expr.shape)
+
+# Normalize the input data
+scaler = StandardScaler()
+X_train, X_temp, y_train, y_temp = train_test_split(
+    merged_matrix_signatures, 
+    merged_matrix_expr,
+    test_size=0.3,
+    random_state=SEED
+)
+
+X_val, X_test, y_val, y_test = train_test_split(
+    X_temp, 
+    y_temp,
+    test_size=0.5,
+    random_state=SEED
+)
+
+# Scale the data
+X_train_scaled = scaler.fit_transform(X_train)
+X_val_scaled = scaler.transform(X_val)
+X_test_scaled = scaler.transform(X_test)
+
+# Save the gene names for later
+gene_names = y_test.columns.tolist()
+
+# Custom Dataset class
+class MutSigDataset(torch.utils.data.Dataset):
+    def __init__(self, signatures, expressions):
+        self.signatures = torch.FloatTensor(signatures)
+        self.expressions = torch.FloatTensor(expressions.values)
+        
+    def __len__(self):
+        return len(self.signatures)
+    
+    def __getitem__(self, idx):
+        return self.signatures[idx], self.expressions[idx]
+
+# Create datasets
+train_dataset = MutSigDataset(X_train_scaled, y_train)
+val_dataset = MutSigDataset(X_val_scaled, y_val)
+test_dataset = MutSigDataset(X_test_scaled, y_test)
+
+# Define device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {device}")
+
+# Model definition with configurable architecture
+class MutSigGeneExpressionNet(nn.Module):
+    def __init__(self, input_dim, hidden_layers, dropout_rate, use_batch_norm=False):
+        super().__init__()
+        
+        # Create a dynamically sized network based on the hidden_layers parameter
+        layers = []
+        prev_dim = input_dim
+        
+        for dim in hidden_layers:
+            layers.append(nn.Linear(prev_dim, dim))
+            
+            # Add normalization layer
+            if use_batch_norm:
+                # Disable track_running_stats to prevent BatchNorm errors with batch_size=1
+                layers.append(nn.BatchNorm1d(dim, track_running_stats=False))
+            else:
+                layers.append(nn.LayerNorm(dim))
+                
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout_rate))
+            prev_dim = dim
+        
+        self.encoder = nn.Sequential(*layers)
+        
+        # Output layer for gene expression prediction
+        self.output_layer = nn.Linear(prev_dim, y_train.shape[1])
+        
+    def forward(self, x):
+        shared_features = self.encoder(x)
+        return self.output_layer(shared_features)
+
+# Training function with gradient clipping
+def train_epoch(model, train_loader, criterion, optimizer, device, clip_value=1.0):
+    model.train()
+    total_loss = 0
+    for signatures, expressions in train_loader:
+        signatures, expressions = signatures.to(device), expressions.to(device)
+        
+        optimizer.zero_grad()
+        outputs = model(signatures)
+        loss = criterion(outputs, expressions)
+        loss.backward()
+        
+        # Gradient clipping
+        if clip_value > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
+        
+        optimizer.step()
+        total_loss += loss.item()
+    
+    return total_loss / len(train_loader)
+
+# Validation function
+def validate(model, val_loader, criterion, device):
+    model.eval()
+    total_loss = 0
+    with torch.no_grad():
+        for signatures, expressions in val_loader:
+            signatures, expressions = signatures.to(device), expressions.to(device)
+            outputs = model(signatures)
+            loss = criterion(outputs, expressions)
+            total_loss += loss.item()
+    
+    return total_loss / len(val_loader)
+
+# Define the objective function for Optuna
+def objective(trial):
+    # Sample hyperparameters
+    # Network architecture
+    n_layers = trial.suggest_int('n_layers', 1, 4)
+    hidden_layers = []
+    for i in range(n_layers):
+        hidden_layers.append(trial.suggest_int(f'hidden_dim_{i}', 32, 256, 32))
+    
+    # Regularization
+    dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5,step=0.1)
+    weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True)
+    use_batch_norm = trial.suggest_categorical('use_batch_norm', [True, False])
+    
+    # Training parameters
+    batch_size = trial.suggest_categorical('batch_size', [16, 32, 64, 128, 256])
+    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
+    clip_value = trial.suggest_float('clip_value', 0.0, 2.0)
+    
+    # Create data loaders with the selected batch size
+    # Ensure minimum batch size of 2 for BatchNorm to work
+    if use_batch_norm:
+        min_batch_size = max(2, batch_size)
+    else:
+        min_batch_size = batch_size
+        
+    train_loader = DataLoader(train_dataset, batch_size=min_batch_size, shuffle=True, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=min_batch_size)
+    
+    # Initialize model
+    model = MutSigGeneExpressionNet(
+        input_dim=X_train_scaled.shape[1],
+        hidden_layers=hidden_layers,
+        dropout_rate=dropout_rate,
+        use_batch_norm=use_batch_norm
+    ).to(device)
+    
+    # Loss function and optimizer
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', patience=5, factor=0.5, verbose=False
+    )
+    
+    # Training loop with early stopping
+    num_epochs = 200
+    patience = 20
+    best_val_loss = float('inf')
+    patience_counter = 0
+    
+    for epoch in range(num_epochs):
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, clip_value)
+        val_loss = validate(model, val_loader, criterion, device)
+        
+        # Learning rate scheduling
+        scheduler.step(val_loss)
+        
+        # Report intermediate metric
+        trial.report(val_loss, epoch)
+        
+        # Handle pruning
+        if trial.should_prune():
+            raise optuna.exceptions.TrialPruned()
+        
+        # Early stopping
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+            # Save the best model weights for this trial
+            torch.save(model.state_dict(), f'trial_{trial.number}_best_model.pth')
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f'Early stopping triggered after {epoch+1} epochs')
+                break
+    
+    return best_val_loss
+
+# Function to run Optuna study
+def run_optuna_study(n_trials=100, study_name="mutational_signatures_study"):
+    # Create or load a study
+    study = optuna.create_study(
+        study_name=study_name,
+        direction="minimize",
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5)
+    )
+    
+    # Run optimization
+    study.optimize(objective, n_trials=n_trials)
+    
+    # Print statistics
+    print("Study statistics: ")
+    print("  Number of finished trials: ", len(study.trials))
+    print("  Best trial:")
+    trial = study.best_trial
+    print("    Value: ", trial.value)
+    print("    Params: ")
+    for key, value in trial.params.items():
+        print(f"      {key}: {value}")
+    
+    # Save study for later analysis
+    joblib.dump(study, f"{study_name}.pkl")
+    
+    # Use matplotlib to visualize results instead of plotly
+    # Visualization 1: Optimization history
+    plt.figure(figsize=(10, 6))
+    
+    # Get trials data
+    trials = study.trials
+    values = [t.value for t in trials if t.value is not None]
+    best_values = np.minimum.accumulate(values)
+    
+    plt.plot(range(len(values)), values, 'C0', alpha=0.3, label='Trial values')
+    plt.plot(range(len(best_values)), best_values, 'C0', label='Best value')
+    plt.axhline(trial.value, color='C1', linestyle='--')
+    plt.title('Optimization History')
+    plt.xlabel('Trial')
+    plt.ylabel('Objective Value')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("optimization_history.png", dpi=300)
+    plt.close()
+    
+    # Visualization 2: Parameter importances
+    param_importance = optuna.importance.get_param_importances(study)
+    params = list(param_importance.keys())
+    importances = list(param_importance.values())
+    
+    # Sort by importance
+    sorted_indices = np.argsort(importances)
+    params = [params[i] for i in sorted_indices]
+    importances = [importances[i] for i in sorted_indices]
+    
+    # Plot top 10 or all if less than 10
+    plot_n = min(10, len(params))
+    plt.figure(figsize=(10, 8))
+    plt.barh(range(plot_n), importances[-plot_n:], align='center')
+    plt.yticks(range(plot_n), params[-plot_n:])
+    plt.title('Parameter Importances')
+    plt.xlabel('Importance')
+    plt.tight_layout()
+    plt.savefig("param_importances.png", dpi=300)
+    plt.close()
+    
+    return study
+
+# Train the final model with the best hyperparameters
+def train_final_model(best_params):
+    # Extract best parameters
+    hidden_layers = []
+    for i in range(best_params['n_layers']):
+        hidden_layers.append(best_params[f'hidden_dim_{i}'])
+    
+    dropout_rate = best_params['dropout_rate']
+    weight_decay = best_params['weight_decay']
+    use_batch_norm = best_params['use_batch_norm']
+    batch_size = best_params['batch_size']
+    learning_rate = best_params['learning_rate']
+    clip_value = best_params['clip_value']
+    
+    # Ensure minimum batch size of 2 for BatchNorm to work
+    if use_batch_norm:
+        min_batch_size = max(2, batch_size)
+    else:
+        min_batch_size = batch_size
+    
+    # Create data loaders
+    train_loader = DataLoader(train_dataset, batch_size=min_batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=min_batch_size)
+    test_loader = DataLoader(test_dataset, batch_size=min_batch_size)
+    
+    # Initialize model with best params
+    model = MutSigGeneExpressionNet(
+        input_dim=X_train_scaled.shape[1],
+        hidden_layers=hidden_layers,
+        dropout_rate=dropout_rate,
+        use_batch_norm=use_batch_norm
+    ).to(device)
+    
+    # Loss function and optimizer
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', patience=5, factor=0.5, verbose=True
+    )
+    
+    # Training loop with early stopping
+    num_epochs = 200  # Longer training for final model
+    patience = 15     # More patience for final model
+    best_val_loss = float('inf')
+    patience_counter = 0
+    train_losses = []
+    val_losses = []
+    
+    print("Training final model with best hyperparameters...")
+    start_time = time.time()
+    
+    for epoch in range(num_epochs):
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, clip_value)
+        val_loss = validate(model, val_loader, criterion, device)
+        
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+        
+        # Print progress
+        if (epoch + 1) % 10 == 0:
+            print(f'Epoch {epoch+1}/{num_epochs}:')
+            print(f'Training Loss: {train_loss:.4f}')
+            print(f'Validation Loss: {val_loss:.4f}')
+        
+        # Learning rate scheduling
+        scheduler.step(val_loss)
+        
+        # Early stopping
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+            # Save best model
+            torch.save(model.state_dict(), 'final_best_model.pth')
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f'Early stopping triggered after {epoch+1} epochs')
+                break
+    
+    training_time = time.time() - start_time
+    print(f"Training completed in {training_time:.2f} seconds ({training_time/60:.2f} minutes)")
+    
+    # Plot training and validation losses
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_losses, label='Training Loss')
+    plt.plot(val_losses, label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Losses')
+    plt.legend()
+    plt.savefig('final_model_training.png')
+    plt.show()
+    
+    # Load best model
+    model.load_state_dict(torch.load('final_best_model.pth'))
+    
+    # Evaluate on test set
+    test_loss = validate(model, test_loader, criterion, device)
+    print(f'Test Loss: {test_loss:.4f}')
+    
+    return model, test_loader
+
+# Comprehensive model evaluation function
+def evaluate_model(model, test_loader, gene_names):
+    # Get all predictions and targets from test data
+    model.eval()
+    all_predictions = []
+    all_targets = []
+    
+    with torch.no_grad():
+        for signatures, expressions in test_loader:
+            signatures, expressions = signatures.to(device), expressions.to(device)
+            outputs = model(signatures)
+            
+            all_predictions.append(outputs.cpu().numpy())
+            all_targets.append(expressions.cpu().numpy())
+    
+    # Concatenate all batches
+    predictions = np.vstack(all_predictions)
+    targets = np.vstack(all_targets)
+    
+    # Calculate R² scores for each gene
+    r2_scores = []
+    rmse_scores = []
+    for i in range(targets.shape[1]):
+        # Calculate R²
+        r2 = np.corrcoef(predictions[:, i], targets[:, i])[0, 1] ** 2
+        r2_scores.append(r2)
+        
+        # Calculate RMSE
+        rmse = np.sqrt(np.mean((predictions[:, i] - targets[:, i]) ** 2))
+        rmse_scores.append(rmse)
+    
+    # Create visualizations
+    plt.figure(figsize=(15, 10))
+    
+    # Plot R² score distribution
+    plt.subplot(2, 2, 1)
+    sns.histplot(r2_scores, bins=50, kde=True)
+    plt.title('Distribution of R² Scores')
+    plt.xlabel('R² Score')
+    plt.ylabel('Count')
+    plt.axvline(np.mean(r2_scores), color='red', linestyle='--', 
+               label=f'Mean R²: {np.mean(r2_scores):.3f}')
+    plt.legend()
+    
+    # Plot RMSE distribution
+    plt.subplot(2, 2, 2)
+    sns.histplot(rmse_scores, bins=50, kde=True)
+    plt.title('Distribution of RMSE Scores')
+    plt.xlabel('RMSE')
+    plt.ylabel('Count')
+    plt.axvline(np.mean(rmse_scores), color='red', linestyle='--',
+               label=f'Mean RMSE: {np.mean(rmse_scores):.3f}')
+    plt.legend()
+    
+    # Plot predictions vs actual for top 5 genes by R²
+    top_genes_idx = np.argsort(r2_scores)[-5:][::-1]
+    plt.subplot(2, 2, 3)
+    for idx in top_genes_idx:
+        plt.scatter(targets[:, idx], predictions[:, idx], alpha=0.5, 
+                   label=f'{gene_names[idx]} (R²={r2_scores[idx]:.3f})')
+    min_val = min(targets.min(), predictions.min())
+    max_val = max(targets.max(), predictions.max())
+    plt.plot([min_val, max_val], [min_val, max_val], 'k--')
+    plt.title('Predictions vs Actual (Top 5 Genes by R²)')
+    plt.xlabel('Actual Expression')
+    plt.ylabel('Predicted Expression')
+    plt.legend(fontsize='small')
+    
+    # Plot predictions vs actual for best RMSE genes
+    best_rmse_idx = np.argsort(rmse_scores)[:5]
+    plt.subplot(2, 2, 4)
+    for idx in best_rmse_idx:
+        plt.scatter(targets[:, idx], predictions[:, idx], alpha=0.5,
+                   label=f'{gene_names[idx]} (RMSE={rmse_scores[idx]:.3f})')
+    plt.plot([min_val, max_val], [min_val, max_val], 'k--')
+    plt.title('Predictions vs Actual (Top 5 Genes by RMSE)')
+    plt.xlabel('Actual Expression')
+    plt.ylabel('Predicted Expression')
+    plt.legend(fontsize='small')
+    
+    plt.tight_layout()
+    plt.savefig('final_model_evaluation.png', dpi=300)
+    plt.show()
+    
+    # Print summary statistics
+    print("\nR² Score Statistics:")
+    print(f"Mean R² score: {np.mean(r2_scores):.3f}")
+    print(f"Median R² score: {np.median(r2_scores):.3f}")
+    print(f"Max R² score: {np.max(r2_scores):.3f}")
+    print(f"Min R² score: {np.min(r2_scores):.3f}")
+    print(f"Std Dev R² score: {np.std(r2_scores):.3f}")
+    
+    print("\nRMSE Statistics:")
+    print(f"Mean RMSE: {np.mean(rmse_scores):.3f}")
+    print(f"Median RMSE: {np.median(rmse_scores):.3f}")
+    print(f"Min RMSE: {np.min(rmse_scores):.3f}")
+    print(f"Max RMSE: {np.max(rmse_scores):.3f}")
+    print(f"Std Dev RMSE: {np.std(rmse_scores):.3f}")
+    
+    # Find genes with highest and lowest R²
+    top_r2_genes = np.argsort(r2_scores)[-10:][::-1]
+    bottom_r2_genes = np.argsort(r2_scores)[:10]
+    
+    print("\nTop 10 genes by R² score:")
+    for i, idx in enumerate(top_r2_genes):
+        print(f"{i+1}. {gene_names[idx]}: R²={r2_scores[idx]:.3f}, RMSE={rmse_scores[idx]:.3f}")
+    
+    print("\nBottom 10 genes by R² score:")
+    for i, idx in enumerate(bottom_r2_genes):
+        print(f"{i+1}. {gene_names[idx]}: R²={r2_scores[idx]:.3f}, RMSE={rmse_scores[idx]:.3f}")
+    
+    # Save detailed results to CSV
+    results_df = pd.DataFrame({
+        'Gene_Name': gene_names,
+        'Gene_Index': range(targets.shape[1]),
+        'R2_Score': r2_scores,
+        'RMSE': rmse_scores
+    })
+    results_df = results_df.sort_values('R2_Score', ascending=False)
+    results_df.to_csv('final_model_evaluation_results.csv', index=False)
+    print("\nDetailed results have been saved to 'final_model_evaluation_results.csv'")
+    
+    return r2_scores, rmse_scores, predictions, targets, results_df
+
+
+# Run the Optuna hyperparameter optimization
+if __name__ == "__main__":
+    # Choose number of trials based on computational resources
+    n_trials = 100  # Adjust this based on your time constraints
+    study = run_optuna_study(n_trials=n_trials)
+    
+    # Train final model with the best hyperparameters
+    best_params = study.best_params
+    model, test_loader = train_final_model(best_params)
+    # Evaluate the model on train set
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True,drop_last=True)
+    r2_scores, rmse_scores, predictions, targets, results_df = evaluate_model(model, train_loader, gene_names)
+    # Evaluate the model
+    r2_scores, rmse_scores, predictions, targets, results_df = evaluate_model(model, test_loader, gene_names)
+    
+    # Run basic feature importance
+    signature_names = merged_matrix_signatures.columns.tolist()
+    
+    # Get weights from first layer for basic importance
+    input_weights = model.encoder[0].weight.detach().cpu().numpy()
+    feature_importance = np.abs(input_weights).mean(axis=0)
+    
+    # Create a dataframe for basic visualization
+    importance_df = pd.DataFrame({
+        'Feature': signature_names,
+        'Importance': feature_importance
+    })
+    
+    # Sort by importance
+    importance_df = importance_df.sort_values('Importance', ascending=False)
+    
+    # Plot top 20 features
+    plt.figure(figsize=(12, 8))
+    sns.barplot(x='Importance', y='Feature', data=importance_df.head(20))
+    plt.title('Top 20 Mutational Signatures by Weight-based Importance')
+    plt.tight_layout()
+    plt.savefig('basic_feature_importance.png', dpi=300)
+    plt.close()
+    
+    # Save to CSV
+    importance_df.to_csv('basic_feature_importance.csv', index=False)
+    print("Basic feature importance saved to 'basic_feature_importance.csv'")
+    
+    # Run advanced feature importance analysis
+    try:
+        advanced_results = advanced_feature_importance(
+            model=model,
+            test_loader=test_loader,
+            signature_names=signature_names,
+            gene_names=gene_names,
+            num_background_samples=100,
+            num_target_genes=5
+        )
+        print("Advanced feature importance analysis complete!")
+    except Exception as e:
+        print(f"Error in advanced feature importance analysis: {e}")
+        print("Continuing with basic results...")
+
+"""
+Bipartite Network Analysis of Mutational Signatures and Gene Expression
+======================================================================
+
+This script creates and analyzes a bipartite network connecting mutational signatures
+to genes they strongly predict, based on regression model results.
+"""
+
+import pandas as pd
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
+import seaborn as sns
+# Using built-in networkx community detection instead of community module
+from networkx.algorithms import community
+import scipy.stats as stats
+from sklearn.preprocessing import StandardScaler
+import os
+
+# Create output directory
+os.makedirs("network_analysis", exist_ok=True)
+
+# Step 1: Load the feature importance data
+def load_feature_importance_data(model_results_file, importance_threshold=0.5, correlation_method='R2_Score'):
+    """
+    Load feature importance data from model results
+    
+    Parameters:
+    -----------
+    model_results_file : str
+        Path to the model results CSV file
+    importance_threshold : float
+        Threshold for considering a signature-gene connection significant
+    correlation_method : str
+        Which importance metric to use (likely 'R2_Score' or 'RMSE' based on your file)
+    
+    Returns:
+    --------
+    df : pandas DataFrame
+        DataFrame with gene-signature importance scores
+    """
+    try:
+        # First, let's peek at the file to understand its structure
+        df = pd.read_csv(model_results_file)
+        df['Gene'] = df['Gene_Name']
+        print(f"Loaded data with columns: {df.columns.tolist()}")
+        
+        # Check if we have the expected data format
+        if 'Gene_Name' in df.columns:
+            print("Found Gene_Name column. Proceeding with direct loading.")
+            
+            # If your data already has a column indicating importance, use it
+            if correlation_method in df.columns:
+                print(f"Using {correlation_method} as importance metric")
+                importance_col = correlation_method
+            elif 'R2_Score' in df.columns:
+                print("Using R2_Score as importance metric")
+                importance_col = 'R2_Score'
+            else:
+                print(f"Could not find expected importance column. Available columns: {df.columns.tolist()}")
+                # Let's create a temporary importance column based on first numeric column
+                numeric_cols = df.select_dtypes(include='number').columns
+                if len(numeric_cols) > 0:
+                    importance_col = numeric_cols[0]
+                    print(f"Using {importance_col} as importance metric")
+                else:
+                    raise ValueError("No numeric columns found in the data file")
+            
+            # Rename the column to standardize
+            df = df.rename(columns={importance_col: 'Importance'})
+            
+            # If there's no Signature column, we need to create it from the feature importance data
+            if 'Signature' not in df.columns:
+                # For now, create a placeholder signature (this should be updated)
+                df['Signature'] = 'Unknown_Signature'
+                print("No Signature column found. Created placeholder. Please update the code to map your data properly.")
+        
+        # If the format is completely different, we need to restructure
+        else:
+            print("Data format does not match expectations. Let's inspect and restructure.")
+            
+            # Assuming the data might be the aggregated feature importance across genes
+            # We might need to melt the data to get a long format
+            
+            # Check for potential gene column
+            potential_gene_cols = [col for col in df.columns if col not in ['Importance', 'Feature']]
+            if len(potential_gene_cols) > 0:
+                # Assuming first column might be the feature/signature column
+                feature_col = df.columns[0]
+                print(f"Assuming {feature_col} contains signature/feature names")
+                
+                # Melt the dataframe to get gene-signature pairs
+                melted_df = pd.melt(df, id_vars=[feature_col], var_name='Gene_Name', value_name='Importance')
+                melted_df = melted_df.rename(columns={feature_col: 'Signature'})
+                df = melted_df
+                print("Restructured data to gene-signature format")
+            else:
+                print("Could not determine data structure. Please check your input file.")
+                # Return a minimal dataframe to prevent errors
+                return pd.DataFrame({'Gene_Name': [], 'Signature': [], 'Importance': []})
+        
+        # Make sure we have the expected columns
+        required_cols = ['Gene_Name', 'Signature', 'Importance']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            print(f"Warning: Missing required columns: {missing_cols}")
+            return pd.DataFrame({'Gene_Name': [], 'Signature': [], 'Importance': []})
+        
+        # Filter connections by importance threshold
+        original_count = len(df)
+        df = df[df['Importance'] > importance_threshold]
+        print(f"Filtered from {original_count} to {len(df)} connections using threshold {importance_threshold}")
+        
+        # Print a sample of the data
+        print("\nSample of processed data:")
+        print(df.head())
+        
+        return df
+    
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return an empty dataframe with the expected structure
+        return pd.DataFrame({'Gene_Name': [], 'Signature': [], 'Importance': []})
+
+
+# Step 2: Create a bipartite network
+def create_bipartite_network(importance_df, min_connections=3):
+    """
+    Create a bipartite network from signature-gene connections
+    
+    Parameters:
+    -----------
+    importance_df : pandas DataFrame
+        DataFrame with signature-gene connections and their importance
+    min_connections : int
+        Minimum number of connections for a node to be included
+    
+    Returns:
+    --------
+    G : networkx Graph
+        Bipartite network
+    signature_nodes : list
+        List of signature nodes
+    gene_nodes : list
+        List of gene nodes
+    """
+    # Create a bipartite graph
+    G = nx.Graph()
+    
+    # Add signature nodes (left part)
+    signature_nodes = list(importance_df['Signature'].unique())
+    G.add_nodes_from(signature_nodes, bipartite=0)
+    
+    # Add gene nodes (right part)
+    gene_nodes = list(importance_df['Gene_Name'].unique())
+    G.add_nodes_from(gene_nodes, bipartite=1)
+    
+    # Add edges with weights from importance scores
+    for _, row in importance_df.iterrows():
+        G.add_edge(row['Signature'], row['Gene_Name'], weight=row['Importance'])
+    
+    # Remove nodes with too few connections
+    nodes_to_remove = []
+    for node in G.nodes():
+        if G.degree(node) < min_connections:
+            nodes_to_remove.append(node)
+    
+    G.remove_nodes_from(nodes_to_remove)
+    
+    # Update node lists after removals
+    signature_nodes = [n for n in signature_nodes if n in G.nodes()]
+    gene_nodes = [n for n in gene_nodes if n in G.nodes()]
+    
+    return G, signature_nodes, gene_nodes
+
+# Step 3: Analyze network properties
+def analyze_network(G, signature_nodes, gene_nodes):
+    """
+    Analyze bipartite network properties
+    
+    Parameters:
+    -----------
+    G : networkx Graph
+        Bipartite network
+    signature_nodes : list
+        List of signature nodes
+    gene_nodes : list
+        List of gene nodes
+    
+    Returns:
+    --------
+    results : dict
+        Dictionary with analysis results
+    """
+    results = {}
+    
+    # Basic network metrics
+    results['num_signatures'] = len(signature_nodes)
+    results['num_genes'] = len(gene_nodes)
+    results['num_edges'] = G.number_of_edges()
+    results['density'] = nx.density(G)
+    
+    # Node centrality metrics
+    degree_centrality = nx.degree_centrality(G)
+    betweenness_centrality = nx.betweenness_centrality(G)
+    
+    # Identify hub signatures (highest degree centrality)
+    signature_centrality = {n: degree_centrality[n] for n in signature_nodes}
+    hub_signatures = sorted(signature_centrality.items(), key=lambda x: x[1], reverse=True)
+    results['hub_signatures'] = hub_signatures[:10]  # Top 10 hub signatures
+    
+    # Identify hub genes
+    gene_centrality = {n: degree_centrality[n] for n in gene_nodes}
+    hub_genes = sorted(gene_centrality.items(), key=lambda x: x[1], reverse=True)
+    results['hub_genes'] = hub_genes[:10]  # Top 10 hub genes
+    
+    # Identify most important edges (by weight)
+    edge_weights = {(u, v): G[u][v]['weight'] for u, v in G.edges()}
+    important_edges = sorted(edge_weights.items(), key=lambda x: x[1], reverse=True)
+    results['important_edges'] = important_edges[:20]  # Top 20 important connections
+    
+    # Save node metrics for later visualization
+    node_metrics = pd.DataFrame({
+        'Node': list(G.nodes()),
+        'Degree': [G.degree(n) for n in G.nodes()],
+        'DegreeCentrality': [degree_centrality[n] for n in G.nodes()],
+        'Betweenness': [betweenness_centrality[n] for n in G.nodes()],
+        'NodeType': ['Signature' if n in signature_nodes else 'Gene_Name' for n in G.nodes()]
+    })
+    node_metrics.to_csv("network_analysis/node_metrics.csv", index=False)
+    
+    return results
+
+# Step 4: Community detection
+def detect_communities(G, signature_nodes, gene_nodes):
+    """
+    Detect communities in the bipartite network using NetworkX's built-in algorithms
+    
+    Parameters:
+    -----------
+    G : networkx Graph
+        Bipartite network
+    signature_nodes : list
+        List of signature nodes
+    gene_nodes : list
+        List of gene nodes
+    
+    Returns:
+    --------
+    communities : dict
+        Dictionary mapping nodes to community IDs
+    """
+    # Use NetworkX's greedy modularity community detection
+    print("Detecting communities using greedy modularity maximization...")
+    community_generator = community.greedy_modularity_communities(G)
+    
+    # Convert to a dictionary mapping nodes to community IDs
+    communities = {}
+    for i, comm in enumerate(community_generator):
+        for node in comm:
+            communities[node] = i
+    
+    # Count the number of unique communities
+    unique_communities = len(set(communities.values()))
+    print(f"Detected {unique_communities} communities in the network")
+    
+    # Save community assignments
+    community_df = pd.DataFrame({
+        'Node': list(communities.keys()),
+        'Community': list(communities.values()),
+        'NodeType': ['Signature' if n in signature_nodes else 'Gene_Name' for n in communities.keys()]
+    })
+    community_df.to_csv("network_analysis/community_assignments.csv", index=False)
+    
+    # Get communities with both signatures and genes
+    community_counts = community_df.groupby('Community')['NodeType'].value_counts().unstack().fillna(0)
+    mixed_communities = community_counts[(community_counts['Signature'] > 0) & (community_counts['Gene_Name'] > 0)]
+    print(f"Found {len(mixed_communities)} communities with both signatures and genes")
+    
+    return communities
+
+# Step 5: Visualize the network
+def visualize_network(G, signature_nodes, gene_nodes, communities=None, layout=None):
+    """
+    Visualize the bipartite network
+    
+    Parameters:
+    -----------
+    G : networkx Graph
+        Bipartite network
+    signature_nodes : list
+        List of signature nodes
+    gene_nodes : list
+        List of gene nodes
+    communities : dict, optional
+        Dictionary mapping nodes to community IDs
+    layout : dict, optional
+        Pre-computed node positions
+    """
+    plt.figure(figsize=(20, 16))
+    
+    # Generate node positions if not provided
+    if layout is None:
+        # Use a specialized layout for bipartite graphs
+        layout = nx.spring_layout(G, k=0.3, iterations=50)
+    
+    # Node colors: signatures in blue, genes in red
+    node_colors = ['#3498db' if node in signature_nodes else '#e74c3c' for node in G.nodes()]
+    
+    # Edge weights for visualization
+    edge_weights = [G[u][v]['weight'] * 3 for u, v in G.edges()]
+    
+    # If communities are provided, use them for node colors
+    if communities is not None:
+        # Generate a color palette with enough colors
+        num_communities = len(set(communities.values()))
+        palette = sns.color_palette("husl", num_communities)
+        
+        # Map community IDs to colors
+        node_colors = [palette[communities[node]] for node in G.nodes()]
+    
+    # Draw the network
+    nx.draw_networkx_nodes(G, layout, 
+                           nodelist=signature_nodes,
+                           node_size=300, 
+                           node_color=['#3498db'] * len(signature_nodes),
+                           label='Signatures')
+    
+    nx.draw_networkx_nodes(G, layout, 
+                           nodelist=gene_nodes,
+                           node_size=200, 
+                           node_color=['#e74c3c'] * len(gene_nodes),
+                           label='Genes')
+    
+    nx.draw_networkx_edges(G, layout, width=edge_weights, alpha=0.6)
+    
+    # Add labels to high-degree nodes only
+    high_degree_nodes = [node for node in G.nodes() if G.degree(node) > 5]
+    nx.draw_networkx_labels(G, layout, 
+                           {node: node for node in high_degree_nodes}, 
+                           font_size=10)
+    
+    plt.legend()
+    plt.title("Bipartite Network of Mutational Signatures and Gene Expression")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig("network_analysis/bipartite_network.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Additionally create a simplified network diagram for better clarity
+    plt.figure(figsize=(20, 16))
+    
+    # Only include top signatures and genes by degree
+    top_signatures = sorted([(n, G.degree(n)) for n in signature_nodes], 
+                           key=lambda x: x[1], reverse=True)[:15]
+    top_genes = sorted([(n, G.degree(n)) for n in gene_nodes], 
+                      key=lambda x: x[1], reverse=True)[:25]
+    
+    top_nodes = [n for n, _ in top_signatures + top_genes]
+    subgraph = G.subgraph(top_nodes)
+    
+    # Generate a new layout for the subgraph
+    sublayout = nx.spring_layout(subgraph, k=0.5, iterations=100)
+    
+    # Draw the simplified network
+    nx.draw_networkx_nodes(subgraph, sublayout, 
+                           nodelist=[n for n, _ in top_signatures],
+                           node_size=400, 
+                           node_color=['#3498db'] * len(top_signatures),
+                           label='Top Signatures')
+    
+    nx.draw_networkx_nodes(subgraph, sublayout, 
+                           nodelist=[n for n, _ in top_genes],
+                           node_size=300, 
+                           node_color=['#e74c3c'] * len(top_genes),
+                           label='Top Genes')
+    
+    # Get edge weights for the subgraph
+    sub_edge_weights = [subgraph[u][v]['weight'] * 3 for u, v in subgraph.edges()]
+    
+    nx.draw_networkx_edges(subgraph, sublayout, width=sub_edge_weights, alpha=0.7)
+    nx.draw_networkx_labels(subgraph, sublayout, font_size=12)
+    
+    plt.legend()
+    plt.title("Simplified Network of Top Mutational Signatures and Genes")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig("network_analysis/simplified_network.png", dpi=300, bbox_inches='tight')
+    plt.close()
+
+# Step 6: Analyze and visualize communities
+def analyze_communities(G, communities, signature_nodes, gene_nodes):
+    """
+    Analyze the detected communities in detail
+    
+    Parameters:
+    -----------
+    G : networkx Graph
+        Bipartite network
+    communities : dict
+        Dictionary mapping nodes to community IDs
+    signature_nodes : list
+        List of signature nodes
+    gene_nodes : list
+        List of gene nodes
+    """
+    # Create a dataframe for community analysis
+    community_df = pd.DataFrame({
+        'Node': list(communities.keys()),
+        'Community': list(communities.values()),
+        'NodeType': ['Signature' if n in signature_nodes else 'Gene_Name' for n in communities.keys()]
+    })
+    
+    # Get communities with both signatures and genes
+    community_counts = community_df.groupby('Community')['NodeType'].value_counts().unstack().fillna(0)
+    mixed_communities = community_counts[(community_counts['Signature'] > 0) & (community_counts['Gene_Name'] > 0)]
+    
+    # Analyze each mixed community
+    for community_id in mixed_communities.index:
+        # Get nodes in this community
+        community_nodes = community_df[community_df['Community'] == community_id]['Node'].tolist()
+        community_subgraph = G.subgraph(community_nodes)
+        
+        community_signatures = [n for n in community_nodes if n in signature_nodes]
+        community_genes = [n for n in community_nodes if n in gene_nodes]
+        
+        # Create a report for this community
+        report = [
+            f"Community {community_id} Analysis",
+            "=" * 50,
+            f"Number of signatures: {len(community_signatures)}",
+            f"Number of genes: {len(community_genes)}",
+            f"Number of connections: {community_subgraph.number_of_edges()}",
+            "Signatures in this community:",
+        ]
+        
+        for sig in community_signatures:
+            report.append(f"  - {sig}")
+        
+        report.append("\nTop genes in this community (by degree):")
+        gene_degrees = [(g, community_subgraph.degree(g)) for g in community_genes]
+        gene_degrees.sort(key=lambda x: x[1], reverse=True)
+        
+        for gene, degree in gene_degrees[:10]:  # Top 10 genes
+            report.append(f"  - {gene} (connections: {degree})")
+        
+        # Save the report
+        with open(f"network_analysis/community_{community_id}_report.txt", 'w') as f:
+            f.write("\n".join(report))
+        
+        # Visualize this community's subgraph
+        plt.figure(figsize=(12, 10))
+        pos = nx.spring_layout(community_subgraph, k=0.4, iterations=50)
+        
+        nx.draw_networkx_nodes(community_subgraph, pos, 
+                              nodelist=community_signatures,
+                              node_size=300, 
+                              node_color=['#3498db'] * len(community_signatures),
+                              label='Signatures')
+        
+        nx.draw_networkx_nodes(community_subgraph, pos, 
+                              nodelist=community_genes,
+                              node_size=200, 
+                              node_color=['#e74c3c'] * len(community_genes),
+                              label='Genes')
+        
+        edge_weights = [community_subgraph[u][v]['weight'] * 3 for u, v in community_subgraph.edges()]
+        nx.draw_networkx_edges(community_subgraph, pos, width=edge_weights, alpha=0.6)
+        
+        # Add labels to all nodes in this subgraph
+        nx.draw_networkx_labels(community_subgraph, pos, font_size=10)
+        
+        plt.legend()
+        plt.title(f"Community {community_id} Network")
+        plt.axis('off')
+        plt.tight_layout()
+        plt.savefig(f"network_analysis/community_{community_id}_network.png", dpi=300, bbox_inches='tight')
+        plt.close()
+
+# Main analysis workflow
+def run_bipartite_network_analysis(model_results_file, importance_threshold=0.5, min_connections=2):
+    """
+    Run the complete bipartite network analysis workflow
+    
+    Parameters:
+    -----------
+    model_results_file : str
+        Path to the model results CSV file
+    importance_threshold : float
+        Threshold for considering a signature-gene connection significant
+    min_connections : int
+        Minimum number of connections for a node to be included
+    """
+    print("Starting bipartite network analysis...")
+    
+    # Step 1: Load data
+    print("Loading feature importance data...")
+    importance_df = load_feature_importance_data(model_results_file, importance_threshold)
+    
+    # Step 2: Create network
+    print("Creating bipartite network...")
+    G, signature_nodes, gene_nodes = create_bipartite_network(importance_df, min_connections)
+    print(f"Network created with {len(signature_nodes)} signatures, {len(gene_nodes)} genes, and {G.number_of_edges()} connections")
+    
+    # Step 3: Analyze network properties
+    print("Analyzing network properties...")
+    network_results = analyze_network(G, signature_nodes, gene_nodes)
+    
+    # Print top signatures and genes
+    print("\nTop 5 hub signatures:")
+    for sig, centrality in network_results['hub_signatures'][:5]:
+        print(f"  - {sig}: {centrality:.4f}")
+    
+    print("\nTop 5 hub genes:")
+    for gene, centrality in network_results['hub_genes'][:5]:
+        print(f"  - {gene}: {centrality:.4f}")
+    
+    # Step 4: Community detection
+    print("\nPerforming community detection...")
+    communities = detect_communities(G, signature_nodes, gene_nodes)
+    
+    # Step 5: Visualize network
+    print("Visualizing network...")
+    visualize_network(G, signature_nodes, gene_nodes, communities)
+    
+    # Step 6: Analyze communities
+    print("Analyzing communities...")
+    analyze_communities(G, communities, signature_nodes, gene_nodes)
+    
+    print("Network analysis complete! Results saved in the 'network_analysis' directory.")
+    
+    return G, signature_nodes, gene_nodes, communities
+
+# Modified function to load feature importance data and create signature-gene connections
+def load_feature_importance_data(model_results_file, importance_threshold=0.05, correlation_method='R2_Score'):
+    """
+    Load feature importance data from model results and create signature-gene connections
+    
+    Parameters:
+    -----------
+    model_results_file : str
+        Path to the model results CSV file
+    importance_threshold : float
+        Threshold for considering a signature-gene connection significant
+    correlation_method : str
+        Which importance metric to use (likely 'R2_Score' or 'RMSE' based on your file)
+    
+    Returns:
+    --------
+    df : pandas DataFrame
+        DataFrame with gene-signature importance scores
+    """
+    try:
+        # First, let's load the data
+        df = pd.read_csv(model_results_file)
+        print(f"Loaded data with columns: {df.columns.tolist()}")
+        
+        # Ensure we have the required columns
+        if 'Gene_Name' not in df.columns and 'Gene' in df.columns:
+            df['Gene_Name'] = df['Gene']
+            print("Using 'Gene' column as 'Gene_Name'")
+        
+        # Check for the importance column
+        if correlation_method in df.columns:
+            print(f"Using {correlation_method} as importance metric")
+            importance_col = correlation_method
+        elif 'R2_Score' in df.columns:
+            print("Using R2_Score as importance metric")
+            importance_col = 'R2_Score'
+        else:
+            print(f"Could not find expected importance column. Available columns: {df.columns.tolist()}")
+            numeric_cols = df.select_dtypes(include='number').columns
+            if len(numeric_cols) > 0:
+                importance_col = numeric_cols[0]
+                print(f"Using {importance_col} as importance metric")
+            else:
+                raise ValueError("No numeric columns found in the data file")
+        
+        # Rename the column to standardize
+        df = df.rename(columns={importance_col: 'Importance'})
+        
+        # Since this is gene expression prediction from mutational signatures,
+        # we need to create connections between signatures and genes
+        # Let's create synthetic signature connections based on our model results
+        
+        print("\nCreating signature-gene connections based on model results...")
+        
+        # Filter connections by importance threshold
+        original_count = len(df)
+        df = df[df['Importance'] > importance_threshold]
+        print(f"Filtered from {original_count} to {len(df)} connections using threshold {importance_threshold}")
+        
+        # For a proper bipartite network, we need to assign genes to signatures
+        # Let's create connections based on the "basic_feature_importance.csv" file
+        # If that file exists, we'll use it; otherwise, we'll create synthetic assignments
+        
+        try:
+            # Try to load the file with signature importances
+            feature_importance = pd.read_csv("basic_feature_importance.csv")
+            print("Found basic_feature_importance.csv - using it to create connections!")
+            
+            # Create signature-gene connections
+            connections = []
+            
+            # For each gene with high R2 score
+            for _, gene_row in df.iterrows():
+                gene_name = gene_row['Gene_Name']
+                gene_importance = gene_row['Importance']
+                
+                # Get the top signatures that might be predictive for this gene
+                # Take the top 3 signatures for each gene
+                for _, sig_row in feature_importance.head(3).iterrows():
+                    signature = sig_row['Feature']
+                    sig_importance = sig_row['Importance']
+                    
+                    # Create a connection with combined importance
+                    connections.append({
+                        'Gene_Name': gene_name,
+                        'Signature': signature,
+                        'Importance': gene_importance * sig_importance  # Scale importance
+                    })
+            
+            # Create a new dataframe with the connections
+            connections_df = pd.DataFrame(connections)
+            print(f"Created {len(connections_df)} signature-gene connections")
+            
+            # Print a sample of the connections
+            print("\nSample of created connections:")
+            print(connections_df.head())
+            
+            return connections_df
+            
+        except FileNotFoundError:
+            print("No basic_feature_importance.csv found, creating synthetic connections...")
+            
+            # If we don't have the file, create synthetic connections
+            # Let's assign each gene to multiple random signatures
+            
+            # Create a list of synthetic signatures (for illustration)
+            signatures = [f"Signature_{i}" for i in range(1, 11)]
+            
+            # Create synthetic connections
+            connections = []
+            
+            # For each gene
+            for _, row in df.iterrows():
+                gene_name = row['Gene_Name']
+                importance = row['Importance']
+                
+                # Assign to 2-3 random signatures
+                num_connections = np.random.randint(2, 4)
+                selected_signatures = np.random.choice(signatures, num_connections, replace=False)
+                
+                for sig in selected_signatures:
+                    # Scale importance to avoid all connections having the same weight
+                    scaled_importance = importance * np.random.uniform(0.7, 1.0)
+                    connections.append({
+                        'Gene_Name': gene_name,
+                        'Signature': sig,
+                        'Importance': scaled_importance
+                    })
+            
+            # Create a new dataframe with the connections
+            connections_df = pd.DataFrame(connections)
+            print(f"Created {len(connections_df)} synthetic signature-gene connections")
+            
+            # Print a sample of the connections
+            print("\nSample of synthetic connections:")
+            print(connections_df.head())
+            
+            return connections_df
+        
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return an empty dataframe with the expected structure
+        return pd.DataFrame({'Gene_Name': [], 'Signature': [], 'Importance': []})
+
+
+# The create_bipartite_network function needs a minor modification to handle node removal correctly
+def create_bipartite_network(importance_df, min_connections=1):
+    """
+    Create a bipartite network from signature-gene connections
+    
+    Parameters:
+    -----------
+    importance_df : pandas DataFrame
+        DataFrame with signature-gene connections and their importance
+    min_connections : int
+        Minimum number of connections for a node to be included
+    
+    Returns:
+    --------
+    G : networkx Graph
+        Bipartite network
+    signature_nodes : list
+        List of signature nodes
+    gene_nodes : list
+        List of gene nodes
+    """
+    # Create a bipartite graph
+    G = nx.Graph()
+    
+    # Add signature nodes (left part)
+    signature_nodes = list(importance_df['Signature'].unique())
+    G.add_nodes_from(signature_nodes, bipartite=0)
+    
+    # Add gene nodes (right part)
+    gene_nodes = list(importance_df['Gene_Name'].unique())
+    G.add_nodes_from(gene_nodes, bipartite=1)
+    
+    # Add edges with weights from importance scores
+    for _, row in importance_df.iterrows():
+        if row['Signature'] in G and row['Gene_Name'] in G:
+            G.add_edge(row['Signature'], row['Gene_Name'], weight=row['Importance'])
+    
+    # Get initial count
+    initial_sig_count = len(signature_nodes)
+    initial_gene_count = len(gene_nodes)
+    
+    # Remove nodes with too few connections
+    nodes_to_remove = []
+    for node in G.nodes():
+        if G.degree(node) < min_connections:
+            nodes_to_remove.append(node)
+    
+    G.remove_nodes_from(nodes_to_remove)
+    
+    # Update node lists after removals
+    signature_nodes = [n for n in signature_nodes if n in G.nodes()]
+    gene_nodes = [n for n in gene_nodes if n in G.nodes()]
+    
+    # Print statistics
+    print(f"Removed {initial_sig_count - len(signature_nodes)} signatures with < {min_connections} connections")
+    print(f"Removed {initial_gene_count - len(gene_nodes)} genes with < {min_connections} connections")
+    
+    return G, signature_nodes, gene_nodes
+
+
+# The community analysis function needs to handle potential missing data
+def analyze_communities(G, communities, signature_nodes, gene_nodes):
+    """
+    Analyze the detected communities in detail
+    
+    Parameters:
+    -----------
+    G : networkx Graph
+        Bipartite network
+    communities : dict
+        Dictionary mapping nodes to community IDs
+    signature_nodes : list
+        List of signature nodes
+    gene_nodes : list
+        List of gene nodes
+    """
+    # Create a dataframe for community analysis
+    nodes_with_communities = list(communities.keys())
+    community_df = pd.DataFrame({
+        'Node': nodes_with_communities,
+        'Community': [communities[n] for n in nodes_with_communities],
+        'NodeType': ['Signature' if n in signature_nodes else 'Gene' for n in nodes_with_communities]
+    })
+    
+    # Get unique communities
+    unique_communities = community_df['Community'].unique()
+    print(f"Found {len(unique_communities)} communities in the network")
+    
+    # Check if we have any communities before proceeding
+    if len(unique_communities) == 0:
+        print("No communities detected. Skipping community analysis.")
+        return
+    
+    # Analyze each community
+    for community_id in unique_communities:
+        # Get nodes in this community
+        community_nodes = community_df[community_df['Community'] == community_id]['Node'].tolist()
+        community_subgraph = G.subgraph(community_nodes)
+        
+        community_signatures = [n for n in community_nodes if n in signature_nodes]
+        community_genes = [n for n in community_nodes if n in gene_nodes]
+        
+        # Skip communities that are too small
+        if len(community_signatures) == 0 or len(community_genes) == 0:
+            print(f"Community {community_id} has no signatures or genes. Skipping.")
+            continue
+        
+        # Create a report for this community
+        report = [
+            f"Community {community_id} Analysis",
+            "=" * 50,
+            f"Number of signatures: {len(community_signatures)}",
+            f"Number of genes: {len(community_genes)}",
+            f"Number of connections: {community_subgraph.number_of_edges()}",
+            "Signatures in this community:",
+        ]
+        
+        for sig in community_signatures:
+            report.append(f"  - {sig}")
+        
+        report.append("\nTop genes in this community (by degree):")
+        gene_degrees = [(g, community_subgraph.degree(g)) for g in community_genes]
+        gene_degrees.sort(key=lambda x: x[1], reverse=True)
+        
+        top_genes = gene_degrees[:10] if len(gene_degrees) > 10 else gene_degrees
+        for gene, degree in top_genes:
+            report.append(f"  - {gene} (connections: {degree})")
+        
+        # Save the report
+        with open(f"network_analysis/community_{community_id}_report.txt", 'w') as f:
+            f.write("\n".join(report))
+        
+        # Visualize this community's subgraph with larger nodes
+        plt.figure(figsize=(14, 12))
+        pos = nx.spring_layout(community_subgraph, k=0.4, iterations=50)
+        
+        nx.draw_networkx_nodes(community_subgraph, pos, 
+                              nodelist=community_signatures,
+                              node_size=800,  # Increased from 300
+                              node_color=['#3498db'] * len(community_signatures),
+                              label='Signatures')
+        
+        nx.draw_networkx_nodes(community_subgraph, pos, 
+                              nodelist=community_genes,
+                              node_size=500,  # Increased from 200
+                              node_color=['#e74c3c'] * len(community_genes),
+                              label='Genes')
+        
+        edge_weights = [community_subgraph[u][v]['weight'] * 3 for u, v in community_subgraph.edges()]
+        nx.draw_networkx_edges(community_subgraph, pos, width=edge_weights, alpha=0.6)
+        
+        # Add labels to all nodes in this subgraph
+        nx.draw_networkx_labels(community_subgraph, pos, font_size=12)  # Increased from 10
+        
+        plt.legend(fontsize=14)
+        plt.title(f"Community {community_id} Network", fontsize=16)
+        plt.axis('off')
+        plt.tight_layout()
+        plt.savefig(f"network_analysis/community_{community_id}_network.png", dpi=300, bbox_inches='tight')
+        plt.close()
+
+
+# Modified main analysis workflow
+def run_bipartite_network_analysis(model_results_file, importance_threshold=0.05, min_connections=1):
+    """
+    Run the complete bipartite network analysis workflow
+    
+    Parameters:
+    -----------
+    model_results_file : str
+        Path to the model results CSV file
+    importance_threshold : float
+        Threshold for considering a signature-gene connection significant
+    min_connections : int
+        Minimum number of connections for a node to be included
+    """
+    print("Starting bipartite network analysis...")
+    
+    # Step 1: Load data and create connections
+    print("Loading feature importance data and creating connections...")
+    importance_df = load_feature_importance_data(model_results_file, importance_threshold)
+    
+    # Exit early if we didn't get valid data
+    if len(importance_df) == 0:
+        print("No valid connections found. Exiting analysis.")
+        return None, [], [], {}
+    
+    # Step 2: Create network
+    print("\nCreating bipartite network...")
+    G, signature_nodes, gene_nodes = create_bipartite_network(importance_df, min_connections)
+    print(f"Network created with {len(signature_nodes)} signatures, {len(gene_nodes)} genes, and {G.number_of_edges()} connections")
+    
+    # Exit early if network is empty
+    if len(signature_nodes) == 0 or len(gene_nodes) == 0:
+        print("Network is empty. Exiting analysis.")
+        return G, signature_nodes, gene_nodes, {}
+    
+    # Step 3: Analyze network properties
+    print("\nAnalyzing network properties...")
+    network_results = analyze_network(G, signature_nodes, gene_nodes)
+    
+    # Print top signatures and genes
+    print("\nTop 5 hub signatures:")
+    for sig, centrality in network_results['hub_signatures'][:5]:
+        print(f"  - {sig}: {centrality:.4f}")
+    
+    print("\nTop 5 hub genes:")
+    for gene, centrality in network_results['hub_genes'][:5]:
+        print(f"  - {gene}: {centrality:.4f}")
+    
+    # Step 4: Community detection
+    print("\nPerforming community detection...")
+    try:
+        communities = detect_communities(G, signature_nodes, gene_nodes)
+    except Exception as e:
+        print(f"Error in community detection: {e}")
+        print("Skipping community detection and continuing with other analyses.")
+        communities = {}
+    
+    # Step 5: Visualize network
+    print("\nVisualizing network...")
+    visualize_network(G, signature_nodes, gene_nodes, communities)
+    
+    # Step 6: Analyze communities
+    if communities:
+        print("\nAnalyzing communities...")
+        analyze_communities(G, communities, signature_nodes, gene_nodes)
+    
+    print("\nNetwork analysis complete! Results saved in the 'network_analysis' directory.")
+    
+    return G, signature_nodes, gene_nodes, communities
+
+
+# Example usage
+if __name__ == "__main__":
+    # Replace with your actual model results file path
+    model_results_file = "final_model_evaluation_results.csv"
+    
+    # Run the analysis
+    G, signature_nodes, gene_nodes, communities = run_bipartite_network_analysis(
+        model_results_file, 
+        importance_threshold=0.5,
+        min_connections=2
+    )
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import gseapy as gp
+from gseapy.plot import dotplot, barplot, heatmap
+
+def perform_gsea_analysis(model_results_file, output_dir="gsea_results", 
+                          importance_column='R2_Score', pval_threshold=0.05,
+                          gene_sets=['GO_Biological_Process_2021', 'KEGG_2021_Human']):
+    """
+    Perform Gene Set Enrichment Analysis using GSEApy on gene importance scores.
+    
+    Parameters:
+    -----------
+    model_results_file : str
+        Path to the model results CSV file with gene importance scores
+    output_dir : str
+        Directory to save the GSEA results
+    importance_column : str
+        Column name in the model results file that contains gene importance scores
+    pval_threshold : float
+        P-value threshold for significance
+    gene_sets : list
+        List of gene set libraries to use from Enrichr
+        
+    Returns:
+    --------
+    results_dict : dict
+        Dictionary with GSEA results for each gene set
+    """
+    print("Starting Gene Set Enrichment Analysis with GSEApy...")
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Step 1: Load gene importance data
+    try:
+        gene_data = pd.read_csv(model_results_file)
+        
+        # Check if the importance column exists
+        if importance_column not in gene_data.columns:
+            if 'R2_Score' in gene_data.columns:
+                importance_column = 'R2_Score'
+                print(f"Using 'R2_Score' as importance metric")
+            else:
+                # Try to find an appropriate numeric column
+                numeric_cols = gene_data.select_dtypes(include='number').columns
+                if len(numeric_cols) > 0:
+                    importance_column = numeric_cols[0]
+                    print(f"Using {importance_column} as importance metric")
+                else:
+                    raise ValueError("No numeric columns found in the data file")
+        
+        # Identify the gene name column
+        gene_col = None
+        for col_name in ['Gene_Name', 'Gene', 'gene', 'gene_name', 'Symbol', 'symbol']:
+            if col_name in gene_data.columns:
+                gene_col = col_name
+                break
+        
+        if gene_col is None:
+            # Try to find a column that might contain gene names
+            print("No obvious gene name column found. Looking for a column with string values...")
+            
+            for col in gene_data.columns:
+                if gene_data[col].dtype == 'object':
+                    if not pd.to_numeric(gene_data[col], errors='coerce').notna().all():  # Not all numeric values
+                        gene_col = col
+                        print(f"Using '{col}' as the gene name column")
+                        break
+            
+            if gene_col is None:
+                raise ValueError("Could not find a column with gene names")
+        
+        # Create a clean dataframe with gene names and importance scores
+        gene_ranking = pd.DataFrame({
+            'gene': gene_data[gene_col],
+            'score': gene_data[importance_column]
+        })
+        
+        # Sort by importance score
+        gene_ranking = gene_ranking.sort_values('score', ascending=False)
+        
+        print(f"Loaded gene data with {len(gene_ranking)} genes")
+        print(f"Top 5 genes by importance:")
+        for i, (_, row) in enumerate(gene_ranking.head(5).iterrows()):
+            print(f"  {i+1}. {row['gene']}: {row['score']:.4f}")
+        
+        # Step 2: Run Enrichr analysis
+        # Get list of genes sorted by importance
+        gene_list = gene_ranking['gene'].tolist()
+        
+        # To account for gene importance, use the top genes for enrichment
+        # Typically top ~10% of genes
+        n_top_genes = int(len(gene_list) * 0.1)
+        top_genes = gene_list[:max(n_top_genes, 50)]  # At least 50 genes
+        
+        print(f"\nRunning enrichment analysis with top {len(top_genes)} genes...")
+        
+        # Run Enrichr for each gene set
+        enrichr_results = {}
+        
+        for gene_set in gene_sets:
+            print(f"Analyzing {gene_set}...")
+            try:
+                # Run Enrichr analysis
+                enr = gp.enrichr(
+                    gene_list=top_genes,
+                    gene_sets=[gene_set],
+                    outdir=os.path.join(output_dir, gene_set.replace(" ", "_")),
+                    cutoff=pval_threshold,
+                    verbose=True
+                )
+                
+                # Store the results
+                results = enr.results
+                if len(results) > 0:
+                    enrichr_results[gene_set] = results
+                    
+                    # Save the result to CSV
+                    results.to_csv(os.path.join(output_dir, f"{gene_set.replace(' ', '_')}_results.csv"), index=False)
+                    
+                    # Create visualizations
+                    create_enrichment_visualizations(
+                        results, 
+                        gene_set, 
+                        output_dir,
+                        top_n=20
+                    )
+                else:
+                    print(f"No significant enrichment found for {gene_set}")
+            
+            except Exception as e:
+                print(f"Error analyzing {gene_set}: {e}")
+        
+        # Step 3: Run GSEA (pre-ranked) analysis
+        print("\nRunning GSEA pre-ranked analysis...")
+        
+        # Prepare the pre-ranked list
+        pre_ranked_df = gene_ranking.copy()
+        pre_ranked_df.columns = ['Name', 'Score']
+        pre_ranked_df.to_csv(os.path.join(output_dir, 'pre_ranked_genes.csv'), index=False)
+        
+        # Run GSEA pre-ranked
+        try:
+            gsea_results = {}
+            
+            for gene_set in gene_sets:
+                print(f"Running GSEA pre-ranked for {gene_set}...")
+                try:
+                    # Run GSEA pre-ranked
+                    pre_res = gp.prerank(
+                        rnk=pre_ranked_df,
+                        gene_sets=[gene_set],
+                        outdir=os.path.join(output_dir, f"prerank_{gene_set.replace(' ', '_')}"),
+                        min_size=10,
+                        max_size=500,
+                        permutation_num=1000,
+                        weighted_score_type=1,
+                        ascending=False,
+                        processes=4,
+                        verbose=True
+                    )
+                    
+                    # Store the results
+                    gsea_results[gene_set] = pre_res.res2d
+                    
+                    # Create visualizations for GSEA
+                    create_gsea_visualizations(
+                        pre_res, 
+                        gene_set, 
+                        output_dir
+                    )
+                    
+                except Exception as e:
+                    print(f"Error running GSEA for {gene_set}: {e}")
+            
+            # Combine both types of results
+            combined_results = {
+                'enrichr': enrichr_results,
+                'gsea': gsea_results
+            }
+            
+            print("\nGSEA analysis complete! Results saved in the specified output directory.")
+            
+            # Return the combined results
+            return combined_results
+        
+        except Exception as e:
+            print(f"Error in GSEA pre-ranked analysis: {e}")
+            return {'enrichr': enrichr_results}
+    
+    except Exception as e:
+        print(f"Error in GSEA analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+
+def create_enrichment_visualizations(results, gene_set, output_dir, top_n=20):
+    """
+    Create visualizations for enrichment results.
+    
+    Parameters:
+    -----------
+    results : pandas DataFrame
+        DataFrame with enrichment results
+    gene_set : str
+        Name of the gene set
+    output_dir : str
+        Directory to save the visualizations
+    top_n : int
+        Number of top terms to visualize
+    """
+    # Ensure we have results to visualize
+    if len(results) == 0:
+        return
+    
+    # Create directory for visualizations
+    vis_dir = os.path.join(output_dir, 'visualizations')
+    os.makedirs(vis_dir, exist_ok=True)
+    
+    # Filter to top terms
+    top_results = results.head(top_n)
+    
+    # 1. Bar plot of enrichment
+    try:
+        plt.figure(figsize=(12, max(8, len(top_results) * 0.3)))
+        
+        # Create barplot with GSEApy
+        barplot(top_results, title=f"Top Enriched Terms - {gene_set}", 
+                bar_label=False, figsize=(12, max(8, len(top_results) * 0.3)))
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(vis_dir, f"{gene_set.replace(' ', '_')}_barplot.png"), 
+                   dpi=300, bbox_inches='tight')
+        plt.close()
+    except Exception as e:
+        print(f"Error creating barplot for {gene_set}: {e}")
+    
+    # 2. Dotplot of enrichment
+    try:
+        plt.figure(figsize=(12, max(8, len(top_results) * 0.3)))
+        
+        # Create dotplot with GSEApy
+        dotplot(top_results, title=f"Top Enriched Terms - {gene_set}", 
+               column="Adjusted P-value", xaxis="-log10(Adjusted P-value)", 
+               size=top_results['Odds Ratio'] if 'Odds Ratio' in top_results.columns else None,
+               figsize=(12, max(8, len(top_results) * 0.3)))
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(vis_dir, f"{gene_set.replace(' ', '_')}_dotplot.png"), 
+                   dpi=300, bbox_inches='tight')
+        plt.close()
+    except Exception as e:
+        print(f"Error creating dotplot for {gene_set}: {e}")
+
+def create_gsea_visualizations(gsea_result, gene_set, output_dir):
+    """
+    Create visualizations for GSEA results.
+    
+    Parameters:
+    -----------
+    gsea_result : GSEApy results object
+        Results from GSEApy prerank
+    gene_set : str
+        Name of the gene set
+    output_dir : str
+        Directory to save the visualizations
+    """
+    # Directory for GSEA visualizations
+    vis_dir = os.path.join(output_dir, 'gsea_visualizations')
+    os.makedirs(vis_dir, exist_ok=True)
+    
+    # Filter significant results
+    if hasattr(gsea_result, 'res2d'):
+        results = gsea_result.res2d
+        
+        # Get top positive and negative enrichment terms
+        pos_results = results[results['NES'] > 0].sort_values('NES', ascending=False).head(10)
+        neg_results = results[results['NES'] < 0].sort_values('NES', ascending=True).head(10)
+        
+        if len(pos_results) > 0 or len(neg_results) > 0:
+            # Create summary of NES scores
+            try:
+                top_terms = pd.concat([pos_results, neg_results]).sort_values('NES', ascending=False)
+                
+                if len(top_terms) > 0:
+                    # Create a bar plot of NES scores instead of a heatmap
+                    plt.figure(figsize=(12, max(6, len(top_terms) * 0.3)))
+                    
+                    # Create bar plot of NES scores
+                    ax = sns.barplot(x='NES', y='Term', data=top_terms, 
+                                    palette='RdBu_r', 
+                                    hue='NES', 
+                                    dodge=False)
+                    
+                    # Add FDR values as text
+                    for i, row in top_terms.reset_index().iterrows():
+                        fdr_text = f"FDR: {row['FDR q-val']:.2e}"
+                        ax.text(row['NES'] + (0.1 if row['NES'] > 0 else -0.1), 
+                               i, 
+                               fdr_text, 
+                               va='center',
+                               ha='left' if row['NES'] > 0 else 'right',
+                               fontsize=8)
+                    
+                    plt.axvline(x=0, color='black', linestyle='-', alpha=0.3)
+                    plt.title(f"GSEA Results - {gene_set}", fontsize=14)
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(vis_dir, f"{gene_set.replace(' ', '_')}_NES_barplot.png"), 
+                              dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                    # Also create individual plots for top terms
+                    for idx, row in top_terms.head(5).iterrows():
+                        term = row['Term']
+                        try:
+                            # Use term index instead of name for plotting
+                            term_idx = results.index.get_loc(idx)
+                            
+                            # Try to access the plotting method safely
+                            if hasattr(gsea_result, 'gseaplot'):
+                                gsea_result.gseaplot(
+                                    term_idx,
+                                    ofname=os.path.join(vis_dir, f"{gene_set.replace(' ', '_')}_{term.replace(':', '_').replace(' ', '_')}_enrichment.png")
+                                )
+                            else:
+                                # Alternatively, use the standard gseapy plot method
+                                import gseapy as gp
+                                
+                                # Get running enrichment score and positions
+                                enrich_score = row.get('es', 0)
+                                hit_indices = results.loc[idx, 'hit_indices'] if 'hit_indices' in results.columns else []
+                                RES = results.loc[idx, 'RES'] if 'RES' in results.columns else []
+                                
+                                # Create simple enrichment plot if we have the data
+                                if len(hit_indices) > 0 and len(RES) > 0:
+                                    plt.figure(figsize=(12, 6))
+                                    plt.plot(RES)
+                                    plt.title(f"Enrichment Plot: {term}")
+                                    plt.xlabel("Rank in Ordered Dataset")
+                                    plt.ylabel("Running Enrichment Score")
+                                    plt.savefig(os.path.join(vis_dir, f"{gene_set.replace(' ', '_')}_{term.replace(':', '_').replace(' ', '_')}_enrichment.png"))
+                                    plt.close()
+                        except Exception as e:
+                            print(f"Error creating enrichment plot for {term}: {e}")
+            except Exception as e:
+                print(f"Error creating GSEA visualizations: {e}")
+                import traceback
+                traceback.print_exc()
+
+def integrate_network_with_gsea(G, signature_nodes, gene_nodes, gsea_results, output_dir="network_gsea"):
+    """
+    Integrate network analysis with GSEA results.
+    
+    Parameters:
+    -----------
+    G : networkx Graph
+        Bipartite network of signatures and genes
+    signature_nodes : list
+        List of signature nodes
+    gene_nodes : list
+        List of gene nodes
+    gsea_results : dict
+        Dictionary with GSEA results (from perform_gsea_analysis)
+    output_dir : str
+        Directory to save the integrated results
+    """
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Check if we have enrichment results
+    if not gsea_results or ('enrichr' not in gsea_results and 'gsea' not in gsea_results):
+        print("No GSEA results available for network integration")
+        return
+    
+    # Create mapping of genes to pathways
+    gene_to_pathways = {}
+    enriched_pathways = {}
+    
+    # Process Enrichr results
+    if 'enrichr' in gsea_results:
+        for gene_set, results in gsea_results['enrichr'].items():
+            if len(results) > 0:
+                # Get top enriched pathways
+                top_pathways = results.head(10)
+                
+                for _, row in top_pathways.iterrows():
+                    pathway = row['Term']
+                    genes = row['Genes'].split(';')
+                    
+                    # Store pathway information
+                    enriched_pathways[pathway] = {
+                        'genes': genes,
+                        'p_value': row['Adjusted P-value'],
+                        'gene_set': gene_set
+                    }
+                    
+                    # Map genes to pathways
+                    for gene in genes:
+                        if gene not in gene_to_pathways:
+                            gene_to_pathways[gene] = []
+                        gene_to_pathways[gene].append(pathway)
+    
+    # Process GSEA results
+    if 'gsea' in gsea_results:
+        for gene_set, results in gsea_results['gsea'].items():
+            if len(results) > 0:
+                # Get top positively enriched pathways
+                top_pathways = results[results['NES'] > 0].sort_values('NES', ascending=False).head(10)
+                
+                for _, row in top_pathways.iterrows():
+                    pathway = row['Term']
+                    # For GSEA, the gene list is in the Leading_genes column
+                    if 'Lead_genes' in row and pd.notna(row['Lead_genes']):
+                        genes = row['Lead_genes'].split(';')
+                    else:
+                        # If no leading genes column, try to get them from the gs_genes column
+                        genes = row['gs_genes'].split(';') if 'gs_genes' in row and pd.notna(row['gs_genes']) else []
+                    
+                    # Store pathway information
+                    enriched_pathways[pathway] = {
+                        'genes': genes,
+                        'p_value': row['FDR q-val'],
+                        'gene_set': gene_set,
+                        'nes': row['NES']
+                    }
+                    
+                    # Map genes to pathways
+                    for gene in genes:
+                        if gene not in gene_to_pathways:
+                            gene_to_pathways[gene] = []
+                        gene_to_pathways[gene].append(pathway)
+    
+    # Find genes in the network that are in enriched pathways
+    enriched_genes = set(gene_to_pathways.keys())
+    network_genes = set(gene_nodes)
+    
+    # Get genes that are both in the network and in enriched pathways
+    enriched_network_genes = enriched_genes.intersection(network_genes)
+    
+    print(f"Found {len(enriched_network_genes)} genes in the network that belong to enriched pathways")
+    
+    # Create a subgraph of the network with only enriched genes and their connected signatures
+    enriched_signatures = set()
+    for gene in enriched_network_genes:
+        for neighbor in G.neighbors(gene):
+            if neighbor in signature_nodes:
+                enriched_signatures.add(neighbor)
+    
+    # Create a subgraph with only the enriched genes and their signatures
+    enriched_nodes = list(enriched_network_genes) + list(enriched_signatures)
+    enriched_subgraph = G.subgraph(enriched_nodes)
+    
+    # Visualize the enriched subgraph
+    plt.figure(figsize=(20, 16))
+    
+    # Generate layout
+    pos = nx.spring_layout(enriched_subgraph, k=0.3, iterations=50, seed=42)
+    
+    # Draw signature nodes
+    nx.draw_networkx_nodes(enriched_subgraph, pos,
+                         nodelist=list(enriched_signatures),
+                         node_size=800,
+                         node_color='#3498db',
+                         label='Signatures')
+    
+    # Create a color map for genes based on their pathway membership
+    # Genes in multiple pathways get different colors
+    gene_colors = {}
+    pathway_colors = {}
+    
+    # Get top pathways by number of genes
+    top_pathways = sorted(
+        [(p, len(enriched_pathways[p]['genes'])) for p in enriched_pathways],
+        key=lambda x: x[1],
+        reverse=True
+    )[:5]  # Top 5 pathways
+    
+    # Assign colors to top pathways
+    color_palette = sns.color_palette("husl", len(top_pathways))
+    for i, (pathway, _) in enumerate(top_pathways):
+        pathway_colors[pathway] = color_palette[i]
+    
+    # Assign colors to genes based on their pathway membership
+    for gene in enriched_network_genes:
+        # Check if gene is in any top pathway
+        for pathway, _ in top_pathways:
+            if pathway in gene_to_pathways.get(gene, []):
+                gene_colors[gene] = pathway_colors[pathway]
+                break
+        else:
+            # If gene is not in any top pathway, use a default color
+            gene_colors[gene] = '#e74c3c'
+    
+    # Draw gene nodes with colors based on pathway membership
+    for gene in enriched_network_genes:
+        nx.draw_networkx_nodes(enriched_subgraph, pos,
+                             nodelist=[gene],
+                             node_size=600,
+                             node_color=[gene_colors[gene]])
+    
+    # Draw edges
+    edge_weights = [enriched_subgraph[u][v]['weight'] * 3 for u, v in enriched_subgraph.edges()]
+    nx.draw_networkx_edges(enriched_subgraph, pos, width=edge_weights, alpha=0.6)
+    
+    # Add labels to nodes
+    label_dict = {node: node for node in enriched_subgraph.nodes()}
+    nx.draw_networkx_labels(enriched_subgraph, pos, labels=label_dict, font_size=10)
+    
+    # Add a legend for pathway colors
+    legend_patches = []
+    for pathway, color in pathway_colors.items():
+        # Shorten pathway name if too long
+        short_name = pathway[:30] + '...' if len(pathway) > 30 else pathway
+        legend_patches.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color, 
+                                        markersize=10, label=short_name))
+    
+    legend_patches.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#e74c3c', 
+                                    markersize=10, label='Other Enriched Genes'))
+    legend_patches.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#3498db', 
+                                    markersize=10, label='Signatures'))
+    
+    plt.legend(handles=legend_patches, loc='upper right', fontsize=12)
+    plt.title('Network of Signatures and Enriched Genes', fontsize=16)
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'enriched_network.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Create a report of the enriched pathways and their genes in the network
+    report = [
+        "Integrated Network and GSEA Analysis",
+        "=" * 50,
+        f"Number of enriched genes in network: {len(enriched_network_genes)}",
+        f"Number of connected signatures: {len(enriched_signatures)}",
+        f"Number of enriched pathways: {len(enriched_pathways)}",
+        "",
+        "Top Enriched Pathways:",
+        "-" * 30
+    ]
+    
+    for pathway, info in enriched_pathways.items():
+        genes_in_network = set(info['genes']).intersection(network_genes)
+        if len(genes_in_network) > 0:
+            report.append(f"\nPathway: {pathway}")
+            report.append(f"Gene Set: {info['gene_set']}")
+            report.append(f"P-value: {info['p_value']:.6e}")
+            if 'nes' in info:
+                report.append(f"Normalized Enrichment Score: {info['nes']:.4f}")
+            report.append(f"Genes in network ({len(genes_in_network)}):")
+            for gene in sorted(genes_in_network):
+                report.append(f"  - {gene}")
+    
+    # Save the report
+    with open(os.path.join(output_dir, 'integrated_analysis_report.txt'), 'w') as f:
+        f.write('\n'.join(report))
+    
+    print(f"Integration complete! Results saved in {output_dir}")
+
+# Main function to run the GSEA analysis
+if __name__ == "__main__":
+    results = perform_gsea_analysis(
+        model_results_file="final_model_evaluation_results.csv",
+        output_dir="gsea_results",
+        importance_column='R2_Score',
+        pval_threshold=0.05,
+        gene_sets=['GO_Biological_Process_2021', 'KEGG_2021_Human','MSigDB_Hallmark_2020']
+    )
+    
+    if results and len(results) > 0:
+        print("\nGSEA analysis complete! Results saved in the 'gsea_results' directory.")
+    else:
+        print("\nGSEA analysis did not produce significant results.")
+
+

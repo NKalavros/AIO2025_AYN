@@ -67,15 +67,15 @@ print(table(sample_manifest[["Project ID"]]))
 # TCGA-BRCA TCGA-CESC   TCGA-OV TCGA-UCEC
 
 tumors <- c(
-    "TCGA-CESC",
     "TCGA-BRCA",
+    "TCGA-CESC",
     "TCGA-OV",
     "TCGA-UCEC"
 )
 res.all <- list()
 for (i in tumors) {
     print(i)
-    genomes_matrix.project <- genomes_matrix[, sample_manifest[["Project ID"]] == i]
+    genomes_matrix.project <- t(genomes_matrix[, sample_manifest[["Project ID"]] == i])
     print(dim(genomes_matrix.project))
     output_dir <- "/gpfs/data/courses/aio2025/yb2612/data/outputs/"
     dir.create(output_dir)
@@ -104,7 +104,7 @@ for (i in tumors) {
         do_mva = T,
         catalog_name = "cosmic_v3p2_inhouse",
         data = c("tcga_mc3"),
-        check_msi = TRUE,
+        check_msi = FALSE,
         add_sig3 = TRUE
     )
     saveRDS(res, file = paste0(project_dir, i, ".rds"))
@@ -123,29 +123,17 @@ res_data <- lapply(res_files, function(x) {
     return(res)
 })
 names(res_data) <- unlist(lapply(res_files, function(x) gsub(".res", "", basename(x))))
+# Add the names from the genome matrix part
+res_data <- sapply(seq(1, length(res_data)), function(x) {
+    i <- tumors[x]
+    genomes_matrix.project <- t(genomes_matrix[, sample_manifest[["Project ID"]] == i])
+    print(dim(genomes_matrix.project))
+    rownames(res_data[[x]]) <- rownames(genomes_matrix.project)
+    return(res_data[[x]])
+}, simplify = F)
+
+
 res.all.lite <- lapply(res_data, lite_df)
-
-res.all.lite <- lapply(res.all.lite, function(df) {
-    y <- df
-    df_exps <- get_sig_exps(df = df, col_exps = "sigs_all", col_sigs = "exps_all")
-    y <- cbind(y, df_exps)
-    return(y)
-})
-
-
-for (i in seq(1, length(res.all.lite))) {
-    write.csv(res.all.lite[[i]], file = paste0("/gpfs/data/courses/aio2025/yb2612/data/outputs/SigMA", names(res.all.lite)[i], ".csv"), row.names = F)
-    print(paste0("Saved ", names(res.all.lite)[i], ".csv"))
-}
-
-res.all.lite.cluster <- lapply(res.all.lite, function(df) {
-    y <- df
-    df_exps_clusters <- get_sig_exps(df = df, col_exps = "cluster_exps_all", col_sigs = "cluster_sigs_all")
-    colnames(df_exps_clusters) <- paste0("clust_", colnames(df_exps_clusters))
-    y <- cbind(df, df_exps_clusters)
-    return(y)
-})
-
 
 
 combine_signature_data <- function(signature_vectors, value_vectors, sample_names = NULL) {
@@ -211,20 +199,16 @@ res.all.lite.splitsigs <- lapply(res.all.lite, function(df) {
     df.extra <- df[, grepl("exp_", colnames(df))]
     # Rbind it to what we have
     df_all <- cbind(df_all, df.extra)
+    rownames(df_all) <- rownames(df)
+    return(df_all)
 })
 
-# Convert to actual names
-res.all.lite.splitsigs <- lapply(res.all.lite.splitsigs, function(df) {
-    y <- df
-    rownames(y) <- rownames(genomes_matrix)
-    return(y)
-})
-# Convert to trinucleotide format
-res.all.lite.splitsigs <- lapply(res.all.lite.splitsigs, function(df) {
-    y <- df
-    from <- rownames(y)
-    return(y)
-})
+names(res.all.lite) <- tumors
+for (i in seq(1, length(res.all.lite.splitsigs))) {
+    write.csv(res.all.lite.splitsigs[[i]], file = paste0("/gpfs/data/courses/aio2025/yb2612/data/outputs/250508_UseThis_SigMA", names(res.all.lite)[i], ".csv"), row.names = T)
+    print(paste0("Saved ", names(res.all.lite)[i], ".csv"))
+}
+
 
 # Convert 4-letter context (like "caaa") to trinucleotide format (like "A[C>A]A")
 to_trinuc <- function(row_label) {
@@ -242,9 +226,3 @@ res.all.lite.splitsigs <- lapply(res.all.lite.splitsigs, function(df) {
     rownames(y) <- sapply(rownames(y), to_trinuc)
     return(y)
 })
-
-
-for (i in seq(1, length(res.all.lite.splitsigs))) {
-    write.csv(res.all.lite[[i]], file = paste0("/gpfs/data/courses/aio2025/yb2612/data/outputs/250506_UseThis_SigMA", names(res.all.lite)[i], ".csv"), row.names = T)
-    print(paste0("Saved ", names(res.all.lite)[i], ".csv"))
-}
