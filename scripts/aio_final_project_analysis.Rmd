@@ -1,0 +1,183 @@
+---
+title: "AIO_final_project"
+author: "Adam Walker"
+date: "2025-05-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/adamwalker/Github_Desktop/Spring_2025/Advanced_integrative_omics")
+
+```
+
+```{r Library load}
+
+library(tidyverse)
+
+```
+
+```{r Data load}
+
+## Write a function to drop any columns that are all 0's
+drop_zero_cols <- function(df) {
+  df %>%
+    select(where(~ any(. != 0)))
+}
+
+## Musical data
+m_brca <- drop_zero_cols(read_csv("Final_input_matrices/Musically/brca_combined_H.csv"))
+m_cesc <- drop_zero_cols(read_csv("Final_input_matrices/Musically/cesc_combined_H.csv"))
+m_ov <- drop_zero_cols(read_csv("Final_input_matrices/Musically/ov_combined_H.csv"))
+m_ucec <- drop_zero_cols(read_csv("Final_input_matrices/Musically/ucec_combined_H.csv"))
+
+## Sigma data but na's are translated to 0's
+s_brca <- drop_zero_cols(read_csv("Final_input_matrices/Sigma/250508_UseThis_SigMATCGA-BRCA.csv")) %>%
+  mutate(across(everything(), ~ replace_na(., 0))) %>%
+  ## Change column names from having "Signature_" to "SBS"
+  rename_with(~ str_replace(., "Signature_", "SBS"), everything())
+s_cesc <- drop_zero_cols(read_csv("Final_input_matrices/Sigma/250508_UseThis_SigMATCGA-CESC.csv")) %>%
+  mutate(across(everything(), ~ replace_na(., 0))) %>%
+  ## Change column names from having "Signature_" to "SBS"
+  rename_with(~ str_replace(., "Signature_", "SBS"), everything())
+s_ov <- drop_zero_cols(read_csv("Final_input_matrices/Sigma/250508_UseThis_SigMATCGA-OV.csv")) %>%
+  mutate(across(everything(), ~ replace_na(., 0))) %>%
+  ## Change column names from having "Signature_" to "SBS"
+  rename_with(~ str_replace(., "Signature_", "SBS"), everything())
+s_ucec <- drop_zero_cols(read_csv("Final_input_matrices/Sigma/250508_UseThis_SigMATCGA-UCEC.csv")) %>%
+  mutate(across(everything(), ~ replace_na(., 0))) %>%
+  ## Change column names from having "Signature_" to "SBS"
+  rename_with(~ str_replace(., "Signature_", "SBS"), everything())
+
+
+## Sigprofiler data
+sp_brca <- drop_zero_cols(read_csv("Final_input_matrices/Sigprofiler/Activities_brca.csv"))
+sp_cesc <- drop_zero_cols(read_csv("Final_input_matrices/Sigprofiler/Activities_cesc.csv"))
+sp_ov <- drop_zero_cols(read_csv("Final_input_matrices/Sigprofiler/Activities_ov.csv"))
+sp_ucec <- drop_zero_cols(read_csv("Final_input_matrices/Sigprofiler/Activities_ucec.csv"))
+
+
+
+```
+
+```{r Comparing Musical and Sigprofiler}
+
+## Get the common columns between the two datasets
+brca_common_cols <- intersect(colnames(m_brca), colnames(sp_brca))
+cesc_common_cols <- intersect(colnames(m_cesc), colnames(sp_cesc))
+ov_common_cols <- intersect(colnames(m_ov), colnames(sp_ov))
+ucec_common_cols <- intersect(colnames(m_ucec), colnames(sp_ucec))
+
+## Create a function to compare the two datasets
+compare_datasets <- function(m_data, sp_data, common_cols) {
+  m_data_filtered <- m_data %>%
+    select(all_of(common_cols)) %>%
+    mutate(across(everything(), as.numeric))
+  
+  sp_data_filtered <- sp_data %>%
+    select(all_of(common_cols)) %>%
+    mutate(across(everything(), as.numeric))
+  
+  comparison <- cor(m_data_filtered, sp_data_filtered, use = "pairwise.complete.obs")
+  
+  return(comparison)
+}
+
+## Compare the datasets
+brca_comparison <- compare_datasets(m_brca, sp_brca, brca_common_cols)
+cesc_comparison <- compare_datasets(m_cesc, sp_cesc, cesc_common_cols)
+ov_comparison <- compare_datasets(m_ov, sp_ov, ov_common_cols)
+ucec_comparison <- compare_datasets(m_ucec, sp_ucec, ucec_common_cols)
+
+## Create a function to plot the comparison
+plot_comparison <- function(comparison, title, c1, c2) {
+  comparison_df <- as.data.frame(comparison)
+  comparison_df$Feature <- rownames(comparison_df)
+  
+  comparison_long <- comparison_df %>%
+    pivot_longer(-Feature, names_to = "Feature2", values_to = "Correlation")
+  
+  ggplot(comparison_long, aes(x = Feature, y = Feature2, fill = Correlation)) +
+    geom_tile() +
+    scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+    theme_minimal() +
+    labs(title = title, x = c(c1," Features"), y = c(c2," Features")) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+## Plot the comparisons
+brca_plot <- plot_comparison(brca_comparison, "BRCA Comparison Musical vs. Sigprofiler", "Musical", "Sigprofiler")
+cesc_plot <- plot_comparison(cesc_comparison, "CESC Comparison Musical vs. Sigprofiler", "Musical", "Sigprofiler")
+ov_plot <- plot_comparison(ov_comparison, "OV Comparison Musical vs. Sigprofiler", "Musical", "Sigprofiler")
+ucec_plot <- plot_comparison(ucec_comparison, "UCEC Comparison Musical vs. Sigprofiler", "Musical", "Sigprofiler")
+
+## Save the plots
+ggsave("brca_comparison_spvm.png", plot = brca_plot, width = 10, height = 8)
+ggsave("cesc_comparison_spvm.png", plot = cesc_plot, width = 10, height = 8)
+ggsave("ov_comparison_spvm.png", plot = ov_plot, width = 10, height = 8)
+ggsave("ucec_comparison_spvm.png", plot = ucec_plot, width = 10, height = 8)
+```
+
+```{r Comparing Musical and Sigma}
+
+## Get the common columns between the two datasets
+brca_common_cols <- intersect(colnames(m_brca), colnames(s_brca))
+cesc_common_cols <- intersect(colnames(m_cesc), colnames(s_cesc))
+ov_common_cols <- intersect(colnames(m_ov), colnames(s_ov))
+ucec_common_cols <- intersect(colnames(m_ucec), colnames(s_ucec))
+
+## exclude "...1" column from common cols
+brca_common_cols <- brca_common_cols[!brca_common_cols %in% c("...1")]
+cesc_common_cols <- cesc_common_cols[!cesc_common_cols %in% c("...1")]
+ov_common_cols <- ov_common_cols[!ov_common_cols %in% c("...1")]
+ucec_common_cols <- ucec_common_cols[!ucec_common_cols %in% c("...1")]
+
+## compare the datasets
+brca_comparison <- compare_datasets(m_brca, s_brca, brca_common_cols)
+cesc_comparison <- compare_datasets(m_cesc, s_cesc, cesc_common_cols)
+ov_comparison <- compare_datasets(m_ov, s_ov, ov_common_cols)
+ucec_comparison <- compare_datasets(m_ucec, s_ucec, ucec_common_cols)
+
+## Plot the comparisons
+brca_plot <- plot_comparison(brca_comparison, "BRCA Comparison Musical vs Sigma", "Musical", "Sigma")
+cesc_plot <- plot_comparison(cesc_comparison, "CESC Comparison Musical vs Sigma", "Musical", "Sigma")
+ov_plot <- plot_comparison(ov_comparison, "OV Comparison Musical vs Sigma", "Musical", "Sigma")
+ucec_plot <- plot_comparison(ucec_comparison, "UCEC Comparison Musical vs Sigma", "Musical", "Sigma")
+
+## Save the plots
+ggsave("brca_comparison_musical_sigma.png", plot = brca_plot, width = 10, height = 8)
+ggsave("cesc_comparison_musical_sigma.png", plot = cesc_plot, width = 10, height = 8)
+ggsave("ov_comparison_musical_sigma.png", plot = ov_plot, width = 10, height = 8)
+ggsave("ucec_comparison_musical_sigma.png", plot = ucec_plot, width = 10, height = 8)
+```
+
+```{r Comparing Sigprofiler and Sigma}
+## Get the common columns between the two datasets
+brca_common_cols <- intersect(colnames(sp_brca), colnames(s_brca))
+cesc_common_cols <- intersect(colnames(sp_cesc), colnames(s_cesc))
+ov_common_cols <- intersect(colnames(sp_ov), colnames(s_ov))
+ucec_common_cols <- intersect(colnames(sp_ucec), colnames(s_ucec))
+
+## compare the datasets
+brca_comparison <- compare_datasets(sp_brca, s_brca, brca_common_cols)
+cesc_comparison <- compare_datasets(sp_cesc, s_cesc, cesc_common_cols)
+ov_comparison <- compare_datasets(sp_ov, s_ov, ov_common_cols)
+ucec_comparison <- compare_datasets(sp_ucec, s_ucec, ucec_common_cols)
+
+## Plot the comparisons
+brca_plot <- plot_comparison(brca_comparison, "BRCA Comparison Sigprofiler and Sigma", "Sigprofiler", "Sigma")
+cesc_plot <- plot_comparison(cesc_comparison, "CESC Comparison Sigprofiler and Sigma", "Sigprofiler", "Sigma")
+ov_plot <- plot_comparison(ov_comparison, "OV Comparison Sigprofiler and Sigma", "Sigprofiler", "Sigma")
+ucec_plot <- plot_comparison(ucec_comparison, "UCEC Comparison Sigprofiler and Sigma", "Sigprofiler", "Sigma")
+
+## Save the plots
+ggsave("brca_comparison_sp_sigma.png", plot = brca_plot, width = 10, height = 8)
+ggsave("cesc_comparison_sp_sigma.png", plot = cesc_plot, width = 10, height = 8)
+ggsave("ov_comparison_sp_sigma.png", plot = ov_plot, width = 10, height = 8)
+ggsave("ucec_comparison_sp_sigma.png", plot = ucec_plot, width = 10, height = 8)
+
+```
+
+
+
+
