@@ -110,8 +110,6 @@ for (i in tumors) {
     saveRDS(res, file = paste0(project_dir, i, ".rds"))
     res.all[[i]] <- res
 }
-
-
 # Get all directories
 library(data.table)
 library(SigMA)
@@ -121,23 +119,132 @@ res_files <- list.files(project_dir, pattern = "\\.res$", full.names = TRUE, rec
 # Load them with fread
 res_data <- lapply(res_files, function(x) {
     res <- fread(x, data.table = F)
+    res$tumor <- gsub(".res", "", basename(x))
     return(res)
 })
 names(res_data) <- unlist(lapply(res_files, function(x) gsub(".res", "", basename(x))))
+res.all.lite <- lapply(res_data, lite_df)
+
+res.all.lite <- lapply(res.all.lite, function(df) {
+    y <- df
+    df_exps <- get_sig_exps(df = df, col_exps = "sigs_all", col_sigs = "exps_all")
+    y <- cbind(y, df_exps)
+    return(y)
+})
 
 
-df <- res_data[[tumors]]
+for (i in seq(1, length(res.all.lite))) {
+    write.csv(res.all.lite[[i]], file = paste0("/gpfs/data/courses/aio2025/yb2612/data/outputs/SigMA", names(res.all.lite)[i], ".csv"), row.names = F)
+    print(paste0("Saved ", names(res.all.lite)[i], ".csv"))
+}
+
+res.all.lite.cluster <- lapply(res.all.lite, function(df) {
+    y <- df
+    df_exps_clusters <- get_sig_exps(df = df, col_exps = "cluster_exps_all", col_sigs = "cluster_sigs_all")
+    colnames(df_exps_clusters) <- paste0("clust_", colnames(df_exps_clusters))
+    y <- cbind(df, df_exps_clusters)
+    return(y)
+})
 
 
-df <- llh_max_characteristics(df, "cervix", "cosmic_v3p2_inhouse")
-df_exps_clusters <- get_sig_exps(df = df, col_exps = "cluster_exps_all", col_sigs = "cluster_sigs_all")
-colnames(df_exps_clusters) <- paste0("clust_", colnames(df_exps_clusters))
-df <- cbind(df, df_exps_clusters)
-df$tumor <- "cervix"
-lite <- lite_df(df)
-df_exps <- get_sig_exps(df = lite, col_exps = "sigs_all", col_sigs = "exps_all")
 
-lite$Signature_3_l_rat
-lite$Signature_3_mva
-lite$pass_mva_strict
-lite$sigs_all
+combine_signature_data <- function(signature_vectors, value_vectors, sample_names = NULL) {
+    # Check if inputs are valid
+    if (length(signature_vectors) != length(value_vectors)) {
+        stop("The number of signature vectors must match the number of value vectors")
+    }
+
+    n_samples <- length(signature_vectors)
+
+    # If sample names aren't provided, create default names
+    if (is.null(sample_names)) {
+        sample_names <- paste0("Column_", 1:n_samples)
+    }
+
+    # Get all unique signatures across all vectors
+    all_signatures <- unique(unlist(signature_vectors))
+
+    # Create an empty dataframe with rows for each unique signature
+    result_df <- data.frame(
+        Signature = all_signatures,
+        stringsAsFactors = FALSE
+    )
+
+    # For each sample, add its values to the dataframe
+    for (i in 1:n_samples) {
+        signatures <- signature_vectors[[i]]
+        values <- value_vectors[[i]]
+
+        # Convert values to numeric if they're character strings
+        values <- as.numeric(values)
+
+        # Create a temporary dataframe for this sample
+        temp_df <- data.frame(
+            Signature = signatures,
+            Value = values,
+            stringsAsFactors = FALSE
+        )
+
+        # Rename the Value column to the sample name
+        colnames(temp_df)[2] <- sample_names[i]
+
+        # Merge with the result dataframe
+        result_df <- merge(result_df, temp_df, by = "Signature", all = TRUE)
+    }
+
+    # Set row names to signatures and optionally remove the Signature column
+    # (commented out in case you want to keep it as a column)
+    # rownames(result_df) <- result_df$Signature
+    # result_df$Signature <- NULL
+
+    return(result_df)
+}
+
+res.all.lite.splitsigs <- lapply(res.all.lite, function(df) {
+    sig.names <- strsplit(df$sigs_all, ".", fixed = T)
+    sig.exps <- strsplit(df$exps_all, "_", fixed = T)
+    df_all <- combine_signature_data(sig.names, sig.exps)
+    rownames(df_all) <- df_all$Signature
+    df_all$Signature <- NULL
+    df_all <- t(df_all)
+    # Grab the columns starting exp_ in it from df
+    df.extra <- df[, grepl("exp_", colnames(df))]
+    # Rbind it to what we have
+    df_all <- cbind(df_all, df.extra)
+})
+
+# Convert to actual names
+res.all.lite.splitsigs <- lapply(res.all.lite.splitsigs, function(df) {
+    y <- df
+    rownames(y) <- rownames(genomes_matrix)
+    return(y)
+})
+# Convert to trinucleotide format
+res.all.lite.splitsigs <- lapply(res.all.lite.splitsigs, function(df) {
+    y <- df
+    from <- rownames(y)
+    return(y)
+})
+
+# Convert 4-letter context (like "caaa") to trinucleotide format (like "A[C>A]A")
+to_trinuc <- function(row_label) {
+    base_map <- c("a" = "A", "c" = "C", "g" = "G", "t" = "T")
+    ref <- base_map[substr(row_label, 1, 1)]
+    alt <- base_map[substr(row_label, 2, 2)]
+    flanking_left <- base_map[substr(row_label, 3, 3)]
+    flanking_right <- base_map[substr(row_label, 4, 4)]
+    return(paste0(flanking_left, "[", ref, ">", alt, "]", flanking_right))
+}
+
+# Apply the conversion to row names in each data frame
+res.all.lite.splitsigs <- lapply(res.all.lite.splitsigs, function(df) {
+    y <- df
+    rownames(y) <- sapply(rownames(y), to_trinuc)
+    return(y)
+})
+
+
+for (i in seq(1, length(res.all.lite.splitsigs))) {
+    write.csv(res.all.lite[[i]], file = paste0("/gpfs/data/courses/aio2025/yb2612/data/outputs/250506_UseThis_SigMA", names(res.all.lite)[i], ".csv"), row.names = T)
+    print(paste0("Saved ", names(res.all.lite)[i], ".csv"))
+}
